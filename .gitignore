@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+
+# Agent 技能与配置
+.claude/
+.codex/
+.trae/
+.cursor/
+.windsurf/
+.gemini/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.log
+tmp/
+temp/
