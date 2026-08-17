@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .tracker import TrackedObject
+from .identity import PersonObject
 from .uniform import UniformResult
 
 
@@ -55,23 +55,15 @@ class JsonOutputWriter:
 
 
 def build_person_record(
-    tracked: TrackedObject,
-    uniform: bool,
-    uniform_result: UniformResult | None = None,
+    person: PersonObject,
 ) -> dict[str, Any]:
-    """把单个目标组装成 JSON 记录。"""
-    if uniform_result is not None:
-        red_ratio = uniform_result.red_ratio
-        red_ratio_main = uniform_result.red_ratio_main
-        red_ratio_lower = uniform_result.red_ratio_lower
-    else:
-        red_ratio = red_ratio_main = red_ratio_lower = 0.0
+    """把稳定人员对象组装成 JSON 记录。"""
     return {
-        "person_id": tracked.track_id,
-        "bbox": [float(v) for v in tracked.xyxy],
-        "uniform": uniform,
-        "red_ratio": round(red_ratio, 4),
-        "red_ratio_main": round(red_ratio_main, 4),
-        "red_ratio_lower": round(red_ratio_lower, 4),
-        "confidence": round(tracked.confidence, 4),
+        "person_id": person.person_id,
+        "bt_id": person.bt_id,
+        "bbox": [float(v) for v in person.xyxy],
+        "uniform": person.uniform,
+        "uniform_state": person.uniform_state,
+        "uniform_prob": round(person.uniform_prob, 4),
+        "confidence": round(person.confidence, 4),
     }

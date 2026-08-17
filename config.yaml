@@ -44,6 +44,13 @@ uniform:
   normalize: true          # 是否先做直方图均衡化（降低光照影响）
   smooth_window: 5         # 工装标签时间平滑窗口（帧数），连续多帧稳定后翻转
 
+identity:
+  uniform_window: 10       # 工装概率滑动窗口（帧），0.3 秒 @30fps
+  uniform_lock_high: 0.8   # 概率 >= 0.8 锁定为“已穿工装”
+  uniform_lock_low: 0.2    # 概率 <= 0.2 锁定为“未穿工装”
+  track_ttl_frames: 90     # 轨迹暂存时长（帧），3 秒 @30fps；超过释放 ID
+  match_distance_factor: 1.5  # 遮挡后恢复 ID 的匹配距离（框宽 * factor）
+
 output:
   json_every_n_frames: 5   # 每 N 帧写一条结构化记录（降频避免日志量过大；1=逐帧）
   show: true               # 是否显示实时叠加画面

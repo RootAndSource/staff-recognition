@@ -13,6 +13,7 @@ import numpy as np
 
 from .config import load_config
 from .detector import PersonDetector
+from .identity import IdentityTracker
 from .output import JsonOutputWriter, build_person_record
 from .tracker import ByteTrackTracker
 from .uniform import UniformClassifier, _RoiSpec
@@ -77,21 +78,23 @@ class DetectionPipeline:
             normalize=ucfg.get("normalize", True),
         )
         self.smooth_window = int(ucfg.get("smooth_window", 5))
-        self._uniform_history: dict[int, deque[bool]] = {}
         self._perf_times: dict[str, list[float]] = {
             "track": [],
             "uniform": [],
+            "identity": [],
             "pipeline_total": [],
         }
         self._should_draw: bool = False  # 由 run() 按 save_video/show 决定
+        icfg = self.config.get("identity", {})
+        self.identity = IdentityTracker(
+            uniform_window=int(icfg.get("uniform_window", 10)),
+            uniform_lock_high=float(icfg.get("uniform_lock_high", 0.8)),
+            uniform_lock_low=float(icfg.get("uniform_lock_low", 0.2)),
+            track_ttl_frames=int(icfg.get("track_ttl_frames", 90)),
+            match_distance_factor=float(icfg.get("match_distance_factor", 1.5)),
+        )
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
         self.detector.load()
-
-    def _smoothed_uniform(self, track_id: int, raw: bool) -> bool:
-        """时间平滑：对每个 track_id 维护滑动窗口，取窗口多数票。"""
-        window = self._uniform_history.setdefault(track_id, deque(maxlen=self.smooth_window))
-        window.append(raw)
-        return sum(window) >= (len(window) + 1) // 2  # 简单多数
 
     def _process_frame(
         self,
@@ -104,27 +107,29 @@ class DetectionPipeline:
         t0 = time.perf_counter()
         tracked = self.tracker.update(frame_bgr, detections=[])
         t1 = time.perf_counter()
-        records: list[dict[str, Any]] = []
-        uniform_count = 0
+        uniform_results: dict[int, Any] = {}
         for obj in tracked:
             if not obj.is_confirmed:
-                continue  # 丢弃未确认轨迹，避免冷启动闪烁
-            w = obj.xyxy[2] - obj.xyxy[0]
-            h = obj.xyxy[3] - obj.xyxy[1]
-            if self.min_box_size and min(w, h) < self.min_box_size:
-                continue  # 过滤过小检测框（多为远距噪声）
-            uni = self.uniform.classify(frame_bgr, obj)
-            smoothed = self._smoothed_uniform(obj.track_id, uni.is_uniform)
-            if smoothed:
-                uniform_count += 1
-            if self._should_draw:
-                draw_tracked(frame_bgr, obj, smoothed)
-            records.append(build_person_record(obj, smoothed, uniform_result=uni))
+                continue
+            uniform_results[obj.track_id] = self.uniform.classify(frame_bgr, obj)
         t2 = time.perf_counter()
+
+        persons = self.identity.update(frame_id, tracked, uniform_results)
+        records: list[dict[str, Any]] = []
+        uniform_count = 0
+        for p in persons:
+            if not p.uniform:
+                continue
+            uniform_count += 1
+            if self._should_draw:
+                draw_tracked(frame_bgr, p)
+            records.append(build_person_record(p))
+        t3 = time.perf_counter()
         if self.output_cfg.get("profile", False):
             self._perf_times["track"].append((t1 - t0) * 1000)
             self._perf_times["uniform"].append((t2 - t1) * 1000)
-        return records, len(records), uniform_count
+            self._perf_times["identity"].append((t3 - t2) * 1000)
+        return records, len(persons), uniform_count
 
     def run(
         self,
