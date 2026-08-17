@@ -83,6 +83,7 @@ class DetectionPipeline:
             "uniform": [],
             "pipeline_total": [],
         }
+        self._should_draw: bool = False  # 由 run() 按 save_video/show 决定
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
         self.detector.load()
 
@@ -116,7 +117,7 @@ class DetectionPipeline:
             smoothed = self._smoothed_uniform(obj.track_id, uni.is_uniform)
             if smoothed:
                 uniform_count += 1
-            if self.output_cfg["show"]:
+            if self._should_draw:
                 draw_tracked(frame_bgr, obj, smoothed)
             records.append(build_person_record(obj, smoothed, uniform_result=uni))
         t2 = time.perf_counter()
@@ -135,6 +136,8 @@ class DetectionPipeline:
         stats = PipelineStats()
         json_writer = JsonOutputWriter(json_path) if json_path else None
         video_writer: cv2.VideoWriter | None = None
+        # 绘制叠加层：只要保存视频或显示窗口，就绘制检测框/标签/统计
+        self._should_draw = bool(save_video) or bool(self.output_cfg.get("show", False))
         profile = bool(self.output_cfg.get("profile", False))
         profile_times: list[tuple[str, float]] = []
 
@@ -181,10 +184,11 @@ class DetectionPipeline:
                     )
 
                 if video_writer is not None:
+                    if self._should_draw:
+                        draw_stats(frame, info.fps, person_count)
                     video_writer.write(frame)
 
                 if self.output_cfg["show"]:
-                    draw_stats(frame, info.fps, person_count)
                     cv2.imshow("Task A - 员工检测", frame)
                     if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                         break

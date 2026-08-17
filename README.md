@@ -46,6 +46,9 @@ python main.py run path/to/video.mp4 --json outputs/run/out.jsonl --save-video o
 # RTSP 流（无显示器环境加 --no-show）
 python main.py run rtsp://user:pass@host:554/stream --no-show --json outputs/run/out.jsonl
 
+# 说明：--save-video 时输出视频始终叠加检测框/标签/统计；
+#       --show 仅控制是否弹出实时预览窗口，--no-show 不影响视频与 JSON 输出。
+
 # 交互标定 HSV / ROI（需要现场截图）
 python main.py calibrate data/frame.jpg
 
