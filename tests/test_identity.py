@@ -30,7 +30,7 @@ def _uniform(is_uniform: bool) -> UniformResult:
 
 
 def test_uniform_locks_high_and_stays() -> None:
-    tr = IdentityTracker(uniform_window=4, uniform_lock_high=0.8, uniform_lock_low=0.2)
+    tr = IdentityTracker(uniform_window=4, uniform_lock_high=0.8)
     # 前 4 帧全部穿工装 → 锁定已穿
     for i in range(4):
         persons = tr.update(i, [_obj(1, [0, 0, 100, 200])], {1: _uniform(True)})
@@ -43,20 +43,21 @@ def test_uniform_locks_high_and_stays() -> None:
     assert persons[0].uniform_state == UNIFORM_LOCKED
 
 
-def test_uniform_locks_low_and_stays() -> None:
-    tr = IdentityTracker(uniform_window=4, uniform_lock_high=0.8, uniform_lock_low=0.2)
+def test_uniform_low_is_not_locked_and_can_upgrade() -> None:
+    tr = IdentityTracker(uniform_window=4, uniform_lock_high=0.8)
     for i in range(4):
         persons = tr.update(i, [_obj(1, [0, 0, 100, 200])], {1: _uniform(False)})
     assert persons[0].uniform is False
-    assert persons[0].uniform_state == UNIFORM_LOCKED
-    # 后续帧出现红色（如背景干扰）→ 未穿标签保持
+    assert persons[0].uniform_state == UNIFORM_ACTIVE  # 未穿不锁定
+    # 后续帧红色证据充分 → 升级为已穿并锁定
     for i in range(4, 8):
         persons = tr.update(i, [_obj(1, [0, 0, 100, 200])], {1: _uniform(True)})
-    assert persons[0].uniform is False
+    assert persons[0].uniform is True
+    assert persons[0].uniform_state == UNIFORM_LOCKED
 
 
 def test_uniform_mixed_window_uses_probability() -> None:
-    tr = IdentityTracker(uniform_window=6, uniform_lock_high=0.8, uniform_lock_low=0.2)
+    tr = IdentityTracker(uniform_window=6, uniform_lock_high=0.8)
     # 6 帧中 4 帧工装：概率 0.67，中间态 → 不锁定，标签取多数
     seq = [True, True, False, True, False, True]
     for i, u in enumerate(seq):

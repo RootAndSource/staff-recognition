@@ -38,6 +38,35 @@ class ByteTrackTracker:
     track_low_thresh: float = 0.1
     new_track_thresh: float = 0.6
     detector: PersonDetector | None = field(default=None, repr=False)
+    merge_overlap_iou: float = 0.3   # 同帧重复框合并阈值（趴姿多框场景）
+
+    @staticmethod
+    def _merge_overlapping(tracked: list[TrackedObject], iou_thres: float) -> list[TrackedObject]:
+        """合并同一帧内高度重叠的检测框，保留高置信度者。
+
+        背景：斜俯视/趴姿下 YOLO 常对同一人输出“上半身小框 + 全身大框”，
+        IoU 不足 NMS 阈值而被当成两个目标。这里按置信度降序贪心合并。
+        """
+        if len(tracked) < 2:
+            return tracked
+        ordered = sorted(tracked, key=lambda o: -o.confidence)
+        kept: list[TrackedObject] = []
+        for obj in ordered:
+            overlap = False
+            for k in kept:
+                a, b = obj.xyxy, k.xyxy
+                x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+                x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+                inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+                area_a = max(a[2] - a[0], 0.0) * max(a[3] - a[1], 0.0)
+                area_b = max(b[2] - b[0], 0.0) * max(b[3] - b[1], 0.0)
+                iou = inter / max(area_a + area_b - inter, 1e-6)
+                if iou >= iou_thres:
+                    overlap = True
+                    break
+            if not overlap:
+                kept.append(obj)
+        return kept
 
     def _ensure_model(self) -> Any:
         if self.detector is None:
@@ -82,4 +111,4 @@ class ByteTrackTracker:
                         is_confirmed=bool(conf >= self.track_high_thresh),
                     )
                 )
-        return tracked
+        return self._merge_overlapping(tracked, self.merge_overlap_iou)

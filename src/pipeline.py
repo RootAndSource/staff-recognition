@@ -60,6 +60,7 @@ class DetectionPipeline:
             track_low_thresh=tcfg["track_low_thresh"],
             new_track_thresh=tcfg["new_track_thresh"],
             detector=self.detector,   # 共享 YOLO 实例，避免重复推理
+            merge_overlap_iou=float(tcfg.get("merge_overlap_iou", 0.3)),
         )
         self.uniform = UniformClassifier(
             roi_main=_RoiSpec(

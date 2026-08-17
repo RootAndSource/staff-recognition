@@ -1,8 +1,9 @@
 """身份与工装状态管理层（位于 ByteTrack 之上）。
 
 两条领域先验：
-1. 员工穿了工装就不会脱（也不会有未穿工装的员工突然穿上）：
-   每个 person 的工装标签用滑动窗口概率判定，达到阈值后双向锁定。
+1. 员工穿了工装就不会脱：
+   每个 person 的工装标签用滑动窗口概率判定，概率足够高时锁定为“已穿工装”；
+   “未穿工装”不锁定（可能被遮挡误判），后续证据充分可升级为“已穿”。
 2. 员工不会凭空消失（走出边界/完全遮挡除外）：
    轨迹消失后暂存一段时间，新检测框位置匹配则复用原 person_id 与工装状态。
 """
@@ -90,7 +91,7 @@ class IdentityTracker:
 
     职责：
     - 维护 ByteTrack track_id → 稳定 person_id 的映射；
-    - 工装标签滑动窗口概率判定 + 双向锁定；
+    - 工装标签滑动窗口概率判定 + 已穿单向锁定；
     - 轨迹暂存恢复（位置匹配复用旧 ID 与工装状态）。
     """
 
@@ -99,13 +100,11 @@ class IdentityTracker:
         *,
         uniform_window: int = 10,
         uniform_lock_high: float = 0.8,
-        uniform_lock_low: float = 0.2,
         track_ttl_frames: int = 90,          # 3 秒 @30fps
         match_distance_factor: float = 1.5,  # 匹配距离 = 框宽 * factor
     ) -> None:
         self.uniform_window = uniform_window
         self.uniform_lock_high = uniform_lock_high
-        self.uniform_lock_low = uniform_lock_low
         self.track_ttl_frames = track_ttl_frames
         self.match_distance_factor = match_distance_factor
 
@@ -126,9 +125,9 @@ class IdentityTracker:
         raw_uniform: bool,
         raw_result: UniformResult,
     ) -> None:
-        """滑动窗口概率更新 + 双向锁定。"""
+        """滑动窗口概率更新 + 单向锁定（已穿锁定，未穿可升级）。"""
         if state.uniform_state == UNIFORM_LOCKED:
-            return  # 已锁定不再变化
+            return  # 已穿工装：永久锁定，不再变化
         state.uniform_history.append(raw_uniform)
         if len(state.uniform_history) > self.uniform_window:
             state.uniform_history.pop(0)
@@ -137,9 +136,6 @@ class IdentityTracker:
         if len(state.uniform_history) >= self.uniform_window:
             if prob >= self.uniform_lock_high:
                 state.uniform = True
-                state.uniform_state = UNIFORM_LOCKED
-            elif prob <= self.uniform_lock_low:
-                state.uniform = False
                 state.uniform_state = UNIFORM_LOCKED
             else:
                 state.uniform = prob >= 0.5
@@ -209,7 +205,7 @@ class IdentityTracker:
             new_person_ids.add(person_id)
 
             raw = uniform_results.get(bt_id)
-            if raw is not None and state.uniform_state != UNIFORM_LOCKED:
+            if raw is not None:
                 self._update_uniform(state, raw.is_uniform, raw)
 
             uniform = bool(state.uniform) if state.uniform is not None else raw.is_uniform if raw else False

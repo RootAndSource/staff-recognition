@@ -21,6 +21,7 @@ tracker:
   track_high_thresh: 0.3   # 轨迹确认阈值（坐姿目标多为 0.2-0.45，0.5 会漏掉）
   track_low_thresh: 0.1    # 低分框阈值
   new_track_thresh: 0.6    # 新轨迹确认阈值
+  merge_overlap_iou: 0.3   # 同帧重复框合并阈值（趴姿“小框+大框”场景）
 
 uniform:
   roi_main:                # 主 ROI：肩胸（相对于检测框，0-1）
@@ -47,7 +48,6 @@ uniform:
 identity:
   uniform_window: 10       # 工装概率滑动窗口（帧），0.3 秒 @30fps
   uniform_lock_high: 0.8   # 概率 >= 0.8 锁定为“已穿工装”
-  uniform_lock_low: 0.2    # 概率 <= 0.2 锁定为“未穿工装”
   track_ttl_frames: 90     # 轨迹暂存时长（帧），3 秒 @30fps；超过释放 ID
   match_distance_factor: 1.5  # 遮挡后恢复 ID 的匹配距离（框宽 * factor）
 
