@@ -90,7 +90,6 @@ class DetectionPipeline:
         self.identity = IdentityTracker(
             uniform_window=int(icfg.get("uniform_window", 10)),
             uniform_lock_high=float(icfg.get("uniform_lock_high", 0.8)),
-            uniform_lock_low=float(icfg.get("uniform_lock_low", 0.2)),
             track_ttl_frames=int(icfg.get("track_ttl_frames", 90)),
             match_distance_factor=float(icfg.get("match_distance_factor", 1.5)),
         )
