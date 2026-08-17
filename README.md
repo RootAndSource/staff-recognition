@@ -50,6 +50,11 @@ python main.py run rtsp://user:pass@host:554/stream --no-show --json outputs/run
 # 说明：--save-video 时输出视频始终叠加检测框/标签/统计；
 #       --show 仅控制是否弹出实时预览窗口，--no-show 不影响视频与 JSON 输出。
 
+# 批量处理（输入目录 → outputs/json、outputs/mp4 分类输出）
+python main.py batch
+# 自定义目录
+python main.py batch --input-dir data/preprocessed --json-dir outputs/json --mp4-dir outputs/mp4
+
 # 交互标定 HSV / ROI（需要现场截图）
 python main.py calibrate data/frame.jpg
 

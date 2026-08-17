@@ -10,6 +10,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+from tqdm import tqdm
 
 from .config import load_config
 from .detector import PersonDetector
@@ -152,50 +153,57 @@ class DetectionPipeline:
             rtsp_timeout_ms=self.video_cfg.get("rtsp_timeout_ms", 5000),
         ) as vs:
             skip = int(self.video_cfg.get("skip_frames", 0))
-            for info in vs.frames(skip=skip):
-                if self.max_frames and stats.frames_processed >= self.max_frames:
-                    break
-                frame = info.frame
-                if video_writer is None and save_video:
-                    h, w = frame.shape[:2]
-                    out_fps = self.output_cfg["video_fps"] or info.fps or 20.0
-                    video_writer = cv2.VideoWriter(
-                        str(save_video),
-                        cv2.VideoWriter_fourcc(*self.output_cfg["video_codec"]),
-                        out_fps,
-                        (w, h),
-                    )
-
-                t_frame = time.perf_counter()
-                records, person_count, uniform_count = self._process_frame(
-                    frame, info.frame_id, info.timestamp_ms
-                )
-                t_done = time.perf_counter()
-                if profile:
-                    profile_times.append(
-                        ("pipeline_total", (t_done - t_frame) * 1000)
-                    )
-                    self._perf_times["pipeline_total"].append((t_done - t_frame) * 1000)
-                stats.frames_processed += 1
-                stats.persons_total += person_count
-                stats.uniform_count += uniform_count
-
-                if json_writer and stats.frames_processed % self.output_cfg["json_every_n_frames"] == 0:
-                    json_writer.write_frame(
-                        frame_id=info.frame_id,
-                        timestamp_ms=info.timestamp_ms,
-                        records=records,
-                    )
-
-                if video_writer is not None:
-                    if self._should_draw:
-                        draw_stats(frame, info.fps, person_count)
-                    video_writer.write(frame)
-
-                if self.output_cfg["show"]:
-                    cv2.imshow("Task A - 员工检测", frame)
-                    if cv2.waitKey(1) & 0xFF in (27, ord("q")):
+            total = vs.frame_count if vs.frame_count and vs.frame_count > 0 else None
+            desc = Path(source).name if not source.startswith(("rtsp://", "http://")) else "rtsp"
+            frames_iter = vs.frames(skip=skip)
+            with tqdm(total=total, desc=desc, unit="f", unit_scale=False, dynamic_ncols=True) as pbar:
+                for info in frames_iter:
+                    if self.max_frames and stats.frames_processed >= self.max_frames:
                         break
+                    frame = info.frame
+                    if video_writer is None and save_video:
+                        h, w = frame.shape[:2]
+                        out_fps = self.output_cfg["video_fps"] or info.fps or 20.0
+                        video_writer = cv2.VideoWriter(
+                            str(save_video),
+                            cv2.VideoWriter_fourcc(*self.output_cfg["video_codec"]),
+                            out_fps,
+                            (w, h),
+                        )
+
+                    t_frame = time.perf_counter()
+                    records, person_count, uniform_count = self._process_frame(
+                        frame, info.frame_id, info.timestamp_ms
+                    )
+                    t_done = time.perf_counter()
+                    if profile:
+                        profile_times.append(
+                            ("pipeline_total", (t_done - t_frame) * 1000)
+                        )
+                        self._perf_times["pipeline_total"].append((t_done - t_frame) * 1000)
+                    stats.frames_processed += 1
+                    stats.persons_total += person_count
+                    stats.uniform_count += uniform_count
+
+                    if json_writer and stats.frames_processed % self.output_cfg["json_every_n_frames"] == 0:
+                        json_writer.write_frame(
+                            frame_id=info.frame_id,
+                            timestamp_ms=info.timestamp_ms,
+                            records=records,
+                        )
+
+                    if video_writer is not None:
+                        if self._should_draw:
+                            draw_stats(frame, info.fps, person_count)
+                        video_writer.write(frame)
+
+                    if self.output_cfg["show"]:
+                        cv2.imshow("Task A - 员工检测", frame)
+                        if cv2.waitKey(1) & 0xFF in (27, ord("q")):
+                            break
+
+                    pbar.update(1)
+                    pbar.set_postfix(people=person_count)
 
         if video_writer is not None:
             video_writer.release()

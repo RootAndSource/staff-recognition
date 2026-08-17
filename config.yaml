@@ -8,10 +8,10 @@ video:
   rtsp_timeout_ms: 5000    # RTSP 打开超时（毫秒）
 
 model:
-  weights: "models/yolo11m.pt"          # yolo11m 在遮挡/坐姿场景检出率与置信度显著优于 11n
+  weights: "models/yolo11x.pt"          # yolo11m 在遮挡/坐姿场景检出率与置信度显著优于 11n
   conf_thres: 0.25         # 检测置信度阈值（11m 下坐姿目标置信度 0.3-0.9，可保持 0.25）
   iou_thres: 0.5           # NMS IoU 阈值
-  imgsz: 640               # 推理输入尺寸
+  imgsz: 960               # 推理输入尺寸
   device: ""               # 留空自动选择（cuda 优先）；可写 "cpu" 或 "0"
   min_box_size: 24         # 检测框最小短边（像素），过滤过小噪声
 
@@ -58,6 +58,12 @@ output:
   video_codec: "mp4v"      # OpenCV 视频写入编码
   video_fps: 0             # 0 表示沿用输入帧率
   profile: false           # 打印各环节耗时（检测/跟踪/工装/输出），定位性能瓶颈
+
+batch:
+  input_dir: "data/preprocessed"   # 批量输入视频目录（001.mp4、002.mp4 ...）
+  json_dir: "outputs/json"         # 批量 JSON 输出目录
+  mp4_dir: "outputs/mp4"           # 批量视频输出目录
+  extensions: [".mp4", ".avi", ".mov"]  # 支持的输入格式
 
 evaluate:
   sample_every_n_frames: 30   # evaluate.py 抽帧间隔
