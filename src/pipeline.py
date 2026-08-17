@@ -118,12 +118,11 @@ class DetectionPipeline:
         records: list[dict[str, Any]] = []
         uniform_count = 0
         for p in persons:
-            if not p.uniform:
-                continue
-            uniform_count += 1
             if self._should_draw:
                 draw_tracked(frame_bgr, p)
             records.append(build_person_record(p))
+            if p.uniform:
+                uniform_count += 1
         t3 = time.perf_counter()
         if self.output_cfg.get("profile", False):
             self._perf_times["track"].append((t1 - t0) * 1000)
