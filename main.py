@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--show", action="store_true", help="显示实时叠加画面")
     run_p.add_argument("--no-show", action="store_true", help="不显示画面（如无显示器环境）")
     run_p.add_argument("--max-frames", type=int, default=0, help="最多处理 N 帧后停止（0=不限制）")
+    run_p.add_argument("--profile", action="store_true", help="打印各环节耗时（定位性能瓶颈）")
 
     cal_p = sub.add_parser("calibrate", help="交互标定 HSV / ROI 参数")
     cal_p.add_argument("image", help="现场截图路径")
@@ -51,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.no_show:
             show = False
         cfg["output"]["show"] = show
+        if args.profile:
+            cfg["output"]["profile"] = True
         json_path = Path(args.json) if args.json else None
         video_path = Path(args.save_video) if args.save_video else None
         stats = pipeline.run(args.source, json_path=json_path, save_video=video_path)

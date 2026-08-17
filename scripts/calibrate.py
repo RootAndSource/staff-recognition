@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from src.detector import Detection
-from src.uniform import UniformClassifier
+from src.uniform import UniformClassifier, _RoiSpec
 
 
 def run_calibrate(image_path: str, config: dict) -> None:
@@ -17,7 +17,14 @@ def run_calibrate(image_path: str, config: dict) -> None:
 
     ucfg = config["uniform"]
     clf = UniformClassifier(
-        roi=(ucfg["roi"]["x_begin"], ucfg["roi"]["y_begin"], ucfg["roi"]["x_end"], ucfg["roi"]["y_end"]),
+        roi_main=_RoiSpec(
+            ucfg["roi_main"]["x_begin"], ucfg["roi_main"]["y_begin"],
+            ucfg["roi_main"]["x_end"], ucfg["roi_main"]["y_end"],
+        ),
+        roi_lower=_RoiSpec(
+            ucfg["roi_lower"]["x_begin"], ucfg["roi_lower"]["y_begin"],
+            ucfg["roi_lower"]["x_end"], ucfg["roi_lower"]["y_end"],
+        ),
         hsv_ranges=((ucfg["hsv_red"]["h1_begin"], ucfg["hsv_red"]["h1_end"]),
                     (ucfg["hsv_red"]["h2_begin"], ucfg["hsv_red"]["h2_end"])),
         s_min=ucfg["hsv_red"]["s_min"],
@@ -48,16 +55,23 @@ def run_calibrate(image_path: str, config: dict) -> None:
     def _render() -> None:
         det = Detection(xyxy=np.array([0, 0, frame.shape[1], frame.shape[0]]), confidence=1.0)
         res = clf.classify(frame, det)
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv)
-        mask = (
-            ((h >= clf.hsv_ranges[0][0]) & (h <= clf.hsv_ranges[0][1]))
-            | ((h >= clf.hsv_ranges[1][0]) & (h <= clf.hsv_ranges[1][1]))
-        ) & (s >= clf.s_min) & (v >= clf.v_min)
+        # 展示主 ROI 内的红色掩码（与判定逻辑一致）
+        rx1, ry1, rx2, ry2 = res.roi_main
+        roi_img = frame[ry1:ry2, rx1:rx2]
+        if roi_img.size == 0:
+            mask = np.zeros((1, 1), dtype=np.uint8)
+        else:
+            hsv = cv2.cvtColor(roi_img, cv2.COLOR_BGR2HSV)
+            h, s, v = cv2.split(hsv)
+            mask = (
+                ((h >= clf.hsv_ranges[0][0]) & (h <= clf.hsv_ranges[0][1]))
+                | ((h >= clf.hsv_ranges[1][0]) & (h <= clf.hsv_ranges[1][1]))
+            ) & (s >= clf.s_min) & (v >= clf.v_min)
         mask_img = cv2.merge([mask.astype(np.uint8) * 255] * 3)
-        rx1, ry1, rx2, ry2 = res.roi
-        cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (255, 0, 0), 2)
-        label = f"red_ratio={res.red_ratio:.3f} uniform={res.is_uniform}"
+        # 标注两个 ROI
+        cv2.rectangle(frame, (res.roi_main[0], res.roi_main[1]), (res.roi_main[2], res.roi_main[3]), (255, 0, 0), 2)
+        cv2.rectangle(frame, (res.roi_lower[0], res.roi_lower[1]), (res.roi_lower[2], res.roi_lower[3]), (0, 255, 255), 2)
+        label = f"main={res.red_ratio_main:.3f} lower={res.red_ratio_lower:.3f} uniform={res.is_uniform}"
         cv2.putText(frame, label, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         combined = np.hstack([frame, mask_img])
         cv2.imshow("calibrate", combined)

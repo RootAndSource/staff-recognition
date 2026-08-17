@@ -56,13 +56,22 @@ class JsonOutputWriter:
 
 def build_person_record(
     tracked: TrackedObject,
-    uniform: UniformResult,
+    uniform: bool,
+    uniform_result: UniformResult | None = None,
 ) -> dict[str, Any]:
     """把单个目标组装成 JSON 记录。"""
+    if uniform_result is not None:
+        red_ratio = uniform_result.red_ratio
+        red_ratio_main = uniform_result.red_ratio_main
+        red_ratio_lower = uniform_result.red_ratio_lower
+    else:
+        red_ratio = red_ratio_main = red_ratio_lower = 0.0
     return {
         "person_id": tracked.track_id,
         "bbox": [float(v) for v in tracked.xyxy],
-        "uniform": bool(uniform.is_uniform),
-        "red_ratio": round(uniform.red_ratio, 4),
+        "uniform": uniform,
+        "red_ratio": round(red_ratio, 4),
+        "red_ratio_main": round(red_ratio_main, 4),
+        "red_ratio_lower": round(red_ratio_lower, 4),
         "confidence": round(tracked.confidence, 4),
     }

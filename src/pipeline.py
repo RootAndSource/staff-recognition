@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+import time
 from typing import Any
 
 import cv2
@@ -13,7 +15,7 @@ from .config import load_config
 from .detector import PersonDetector
 from .output import JsonOutputWriter, build_person_record
 from .tracker import ByteTrackTracker
-from .uniform import UniformClassifier
+from .uniform import UniformClassifier, _RoiSpec
 from .video_input import VideoSource
 from .visualizer import draw_stats, draw_tracked
 
@@ -50,6 +52,7 @@ class DetectionPipeline:
             imgsz=mcfg["imgsz"],
             device=mcfg.get("device", ""),
         )
+        self.min_box_size = int(mcfg.get("min_box_size", 0))
         self.tracker = ByteTrackTracker(
             lost_buffer=tcfg["lost_buffer"],
             track_high_thresh=tcfg["track_high_thresh"],
@@ -58,7 +61,14 @@ class DetectionPipeline:
             detector=self.detector,   # 共享 YOLO 实例，避免重复推理
         )
         self.uniform = UniformClassifier(
-            roi=(ucfg["roi"]["x_begin"], ucfg["roi"]["y_begin"], ucfg["roi"]["x_end"], ucfg["roi"]["y_end"]),
+            roi_main=_RoiSpec(
+                ucfg["roi_main"]["x_begin"], ucfg["roi_main"]["y_begin"],
+                ucfg["roi_main"]["x_end"], ucfg["roi_main"]["y_end"],
+            ),
+            roi_lower=_RoiSpec(
+                ucfg["roi_lower"]["x_begin"], ucfg["roi_lower"]["y_begin"],
+                ucfg["roi_lower"]["x_end"], ucfg["roi_lower"]["y_end"],
+            ),
             hsv_ranges=((ucfg["hsv_red"]["h1_begin"], ucfg["hsv_red"]["h1_end"]),
                         (ucfg["hsv_red"]["h2_begin"], ucfg["hsv_red"]["h2_end"])),
             s_min=ucfg["hsv_red"]["s_min"],
@@ -66,8 +76,21 @@ class DetectionPipeline:
             red_ratio_threshold=ucfg["red_ratio_threshold"],
             normalize=ucfg.get("normalize", True),
         )
+        self.smooth_window = int(ucfg.get("smooth_window", 5))
+        self._uniform_history: dict[int, deque[bool]] = {}
+        self._perf_times: dict[str, list[float]] = {
+            "track": [],
+            "uniform": [],
+            "pipeline_total": [],
+        }
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
         self.detector.load()
+
+    def _smoothed_uniform(self, track_id: int, raw: bool) -> bool:
+        """时间平滑：对每个 track_id 维护滑动窗口，取窗口多数票。"""
+        window = self._uniform_history.setdefault(track_id, deque(maxlen=self.smooth_window))
+        window.append(raw)
+        return sum(window) >= (len(window) + 1) // 2  # 简单多数
 
     def _process_frame(
         self,
@@ -77,18 +100,29 @@ class DetectionPipeline:
     ) -> tuple[list[dict[str, Any]], int, int]:
         """单帧处理：返回 (json_records, 人数, 工装人数)。"""
         # ByteTrack 的 track() 内部已包含检测，不重复调用 detect()
+        t0 = time.perf_counter()
         tracked = self.tracker.update(frame_bgr, detections=[])
+        t1 = time.perf_counter()
         records: list[dict[str, Any]] = []
         uniform_count = 0
         for obj in tracked:
             if not obj.is_confirmed:
                 continue  # 丢弃未确认轨迹，避免冷启动闪烁
+            w = obj.xyxy[2] - obj.xyxy[0]
+            h = obj.xyxy[3] - obj.xyxy[1]
+            if self.min_box_size and min(w, h) < self.min_box_size:
+                continue  # 过滤过小检测框（多为远距噪声）
             uni = self.uniform.classify(frame_bgr, obj)
-            if uni.is_uniform:
+            smoothed = self._smoothed_uniform(obj.track_id, uni.is_uniform)
+            if smoothed:
                 uniform_count += 1
             if self.output_cfg["show"]:
-                draw_tracked(frame_bgr, obj, uni)
-            records.append(build_person_record(obj, uni))
+                draw_tracked(frame_bgr, obj, smoothed)
+            records.append(build_person_record(obj, smoothed, uniform_result=uni))
+        t2 = time.perf_counter()
+        if self.output_cfg.get("profile", False):
+            self._perf_times["track"].append((t1 - t0) * 1000)
+            self._perf_times["uniform"].append((t2 - t1) * 1000)
         return records, len(records), uniform_count
 
     def run(
@@ -101,6 +135,8 @@ class DetectionPipeline:
         stats = PipelineStats()
         json_writer = JsonOutputWriter(json_path) if json_path else None
         video_writer: cv2.VideoWriter | None = None
+        profile = bool(self.output_cfg.get("profile", False))
+        profile_times: list[tuple[str, float]] = []
 
         with VideoSource(
             source,
@@ -123,9 +159,16 @@ class DetectionPipeline:
                         (w, h),
                     )
 
+                t_frame = time.perf_counter()
                 records, person_count, uniform_count = self._process_frame(
                     frame, info.frame_id, info.timestamp_ms
                 )
+                t_done = time.perf_counter()
+                if profile:
+                    profile_times.append(
+                        ("pipeline_total", (t_done - t_frame) * 1000)
+                    )
+                    self._perf_times["pipeline_total"].append((t_done - t_frame) * 1000)
                 stats.frames_processed += 1
                 stats.persons_total += person_count
                 stats.uniform_count += uniform_count
@@ -151,4 +194,16 @@ class DetectionPipeline:
         if json_writer is not None:
             json_writer.close()
         cv2.destroyAllWindows()
+        if profile and profile_times:
+            import statistics
+            for name, vals in self._perf_times.items():
+                if not vals:
+                    continue
+                vals_sorted = sorted(vals)
+                print(
+                    f"[profile] {name:15s}: mean={statistics.mean(vals):6.1f}ms "
+                    f"p50={vals_sorted[len(vals_sorted)//2]:6.1f}ms "
+                    f"p99={vals_sorted[int(len(vals_sorted)*0.99)-1]:6.1f}ms "
+                    f"max={max(vals):6.1f}ms n={len(vals)}"
+                )
         return stats

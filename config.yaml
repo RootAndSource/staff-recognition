@@ -9,22 +9,28 @@ video:
 
 model:
   weights: "models/yolo11n.pt"          # 本地权重（首次可留 ultralytics 自动下载的默认名）
-  conf_thres: 0.35         # 检测置信度阈值（现场标定，建议 0.3-0.5）
+  conf_thres: 0.2          # 检测置信度阈值（斜俯视坐姿目标置信度低，实测 0.15-0.45）
   iou_thres: 0.5           # NMS IoU 阈值
   imgsz: 640               # 推理输入尺寸
   device: ""               # 留空自动选择（cuda 优先）；可写 "cpu" 或 "0"
+  min_box_size: 24         # 检测框最小短边（像素），过滤坐姿误检噪声
 
 tracker:
   name: "bytetrack"        # 当前仅 bytetrack；预留 oc-sort / strongsort 切换位
   lost_buffer: 30          # 轨迹丢失缓冲帧数
-  track_high_thresh: 0.5   # 高分框阈值（ByteTrack 关联用）
+  track_high_thresh: 0.3   # 轨迹确认阈值（坐姿目标多为 0.2-0.45，0.5 会漏掉）
   track_low_thresh: 0.1    # 低分框阈值
   new_track_thresh: 0.6    # 新轨迹确认阈值
 
 uniform:
-  roi:                     # 上半身 ROI（相对于检测框，0-1 区间，现场标定）
-    y_begin: 0.20          # 建议起始 0.20
-    y_end: 0.60            # 建议结束 0.60
+  roi_main:                # 主 ROI：肩胸（相对于检测框，0-1）
+    y_begin: 0.15
+    y_end: 0.55
+    x_begin: 0.10
+    x_end: 0.90
+  roi_lower:               # 兜底 ROI：腹腰（斜俯视/桌子遮挡时用，任一段达标即判工装）
+    y_begin: 0.45
+    y_end: 0.85
     x_begin: 0.10
     x_end: 0.90
   hsv_red:                 # HSV 红色双区间（OpenCV H 范围 0-180）
@@ -32,10 +38,11 @@ uniform:
     h1_end: 10
     h2_begin: 170
     h2_end: 180
-    s_min: 80              # 现场标定
-    v_min: 80              # 现场标定
-  red_ratio_threshold: 0.10   # 红色像素占比阈值（建议 0.08-0.15，现场标定）
+    s_min: 70              # 现场标定（下调以适配背光/桌面反光）
+    v_min: 70              # 现场标定
+  red_ratio_threshold: 0.08   # 红色像素占比阈值（实测坐姿 ROI 红色占比 0.02-0.07）
   normalize: true          # 是否先做直方图均衡化（降低光照影响）
+  smooth_window: 5         # 工装标签时间平滑窗口（帧数），连续多帧稳定后翻转
 
 output:
   json_every_n_frames: 5   # 每 N 帧写一条结构化记录（降频避免日志量过大；1=逐帧）
@@ -43,6 +50,7 @@ output:
   save_video: false        # 是否保存输出视频
   video_codec: "mp4v"      # OpenCV 视频写入编码
   video_fps: 0             # 0 表示沿用输入帧率
+  profile: false           # 打印各环节耗时（检测/跟踪/工装/输出），定位性能瓶颈
 
 evaluate:
   sample_every_n_frames: 30   # evaluate.py 抽帧间隔
