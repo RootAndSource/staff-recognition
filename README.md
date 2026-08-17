@@ -24,8 +24,9 @@ python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 ```
 
-首次运行会自动下载 YOLO 预训练权重（`yolo11n.pt`）到本地缓存；
+默认使用 `yolo11m.pt`（遮挡/坐姿场景检出率显著优于 11n，RTX 4070 下约 12-23ms/帧）；
 权重路径可在 `config.yaml` 的 `model.weights` 指定本地文件。
+模型下载：`curl.exe --ssl-no-revoke -L -o models/yolo11m.pt https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11m.pt`
 
 ## GPU 加速
 
