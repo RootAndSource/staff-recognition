@@ -1,0 +1,9 @@
+# 任务 A 员工检测 - Python 依赖（Python 3.10+）
+opencv-python>=4.8.0
+numpy>=1.24.0
+PyYAML>=6.0
+ultralytics>=8.2.0
+lap>=0.5.12
+
+# 开发/测试
+pytest>=8.0.0

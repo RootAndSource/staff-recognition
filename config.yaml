@@ -1,0 +1,50 @@
+# 任务 A 员工检测 - 全局配置
+# 现场标定参数（置信度/ROI/HSV/红色占比/跟踪缓冲）统一在这里调整，不修改代码。
+
+video:
+  max_width: 1280          # 超过该宽度则等比降采样（降低输入分辨率提高实时性）
+  max_height: 720          # 超过该高度则等比降采样
+  skip_frames: 0           # 每处理 1 帧跳过的帧数（>0 时降低有效 FPS，节省算力）
+  rtsp_timeout_ms: 5000    # RTSP 打开超时（毫秒）
+
+model:
+  weights: "models/yolo11n.pt"          # 本地权重（首次可留 ultralytics 自动下载的默认名）
+  conf_thres: 0.35         # 检测置信度阈值（现场标定，建议 0.3-0.5）
+  iou_thres: 0.5           # NMS IoU 阈值
+  imgsz: 640               # 推理输入尺寸
+  device: ""               # 留空自动选择（cuda 优先）；可写 "cpu" 或 "0"
+
+tracker:
+  name: "bytetrack"        # 当前仅 bytetrack；预留 oc-sort / strongsort 切换位
+  lost_buffer: 30          # 轨迹丢失缓冲帧数
+  track_high_thresh: 0.5   # 高分框阈值（ByteTrack 关联用）
+  track_low_thresh: 0.1    # 低分框阈值
+  new_track_thresh: 0.6    # 新轨迹确认阈值
+
+uniform:
+  roi:                     # 上半身 ROI（相对于检测框，0-1 区间，现场标定）
+    y_begin: 0.20          # 建议起始 0.20
+    y_end: 0.60            # 建议结束 0.60
+    x_begin: 0.10
+    x_end: 0.90
+  hsv_red:                 # HSV 红色双区间（OpenCV H 范围 0-180）
+    h1_begin: 0
+    h1_end: 10
+    h2_begin: 170
+    h2_end: 180
+    s_min: 80              # 现场标定
+    v_min: 80              # 现场标定
+  red_ratio_threshold: 0.10   # 红色像素占比阈值（建议 0.08-0.15，现场标定）
+  normalize: true          # 是否先做直方图均衡化（降低光照影响）
+
+output:
+  json_every_n_frames: 5   # 每 N 帧写一条结构化记录（降频避免日志量过大；1=逐帧）
+  show: true               # 是否显示实时叠加画面
+  save_video: false        # 是否保存输出视频
+  video_codec: "mp4v"      # OpenCV 视频写入编码
+  video_fps: 0             # 0 表示沿用输入帧率
+
+evaluate:
+  sample_every_n_frames: 30   # evaluate.py 抽帧间隔
+  sample_count: 100           # 人工抽查帧数（验收口径 100 帧）
+  annotation_csv: "outputs/run/annotations.csv"
