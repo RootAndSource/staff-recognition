@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
+import yaml
 
 from .detector import Detection, PersonDetector
 
@@ -39,6 +41,7 @@ class ByteTrackTracker:
     new_track_thresh: float = 0.6
     detector: PersonDetector | None = field(default=None, repr=False)
     merge_overlap_iou: float = 0.3   # 同帧重复框合并阈值（趴姿多框场景）
+    tracker_yaml: str | None = field(default=None, repr=False)  # 自定义 ByteTrack 配置
 
     @staticmethod
     def _merge_overlapping(tracked: list[TrackedObject], iou_thres: float) -> list[TrackedObject]:
@@ -76,6 +79,30 @@ class ByteTrackTracker:
             )
         return self.detector.load()
 
+    @staticmethod
+    def write_tracker_yaml(
+        path: str | Path,
+        *,
+        track_buffer: int,
+        track_high_thresh: float,
+        track_low_thresh: float,
+        new_track_thresh: float,
+    ) -> Path:
+        """写出自定义 ByteTrack 配置（track_buffer 等参数真正生效）。"""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        cfg = {
+            "tracker_type": "bytetrack",
+            "track_high_thresh": track_high_thresh,
+            "track_low_thresh": track_low_thresh,
+            "new_track_thresh": new_track_thresh,
+            "track_buffer": track_buffer,
+            "match_thresh": 0.8,
+            "fuse_score": True,
+        }
+        p.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+        return p
+
     def update(self, frame_bgr: cv2.Mat, detections: list[Detection]) -> list[TrackedObject]:
         """更新轨迹并返回带 track_id 的目标列表。
 
@@ -86,7 +113,7 @@ class ByteTrackTracker:
         results = model.track(
             frame_bgr,
             persist=True,
-            tracker="bytetrack.yaml",
+            tracker=self.tracker_yaml or "bytetrack.yaml",
             conf=self.detector.conf_thres,
             iou=self.detector.iou_thres,
             imgsz=self.detector.imgsz,

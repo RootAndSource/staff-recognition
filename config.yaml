@@ -53,8 +53,12 @@ identity:
   uniform_confirm_frames: 60    # 高置信态所需一致帧数（约 2 秒）
   uniform_confirm_high: 0.9     # 高置信态概率要求
   reverse_streak_frames: 5      # 标签翻转所需连续反向证据帧数（翻转惯性）
-  track_ttl_frames: 90     # 轨迹暂存时长（帧），3 秒 @30fps；超过释放 ID
-  match_distance_factor: 1.5  # 遮挡后恢复 ID 的匹配距离（框宽 * factor）
+  track_ttl_frames: 300         # 画面内消失轨迹暂存时长（帧），10 秒 @30fps
+  boundary_ttl_frames: 60       # 边界附近消失暂存时长（帧），2 秒；允许再进来成新 ID
+  match_distance_factor: 2.5    # 位置匹配距离（框宽 * factor）
+  appearance_corr_threshold: 0.85  # 外观（HSV 直方图）相关性兜底阈值
+  person_confirm_frames: 3      # 新 ID 确认期（连续稳定帧数，消灭短命误检 ID）
+  leave_visible_ratio: 0.4      # 检测框可见面积 < 40% 才视为走出画面（被裁切不算）
 
 output:
   json_every_n_frames: 5   # 每 N 帧写一条结构化记录（降频避免日志量过大；1=逐帧）

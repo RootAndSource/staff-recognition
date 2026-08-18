@@ -92,6 +92,16 @@ python main.py evaluate --video data/videos/005.mp4 --frames 100
   `uniform_prob`、`red_ratio_connected`（最大红色连通域占比）、
   `baseline_ratio`（场景红色基线），便于排查误判。
 
+## 身份与工装状态管理（v0.5，ID 生命周期）
+
+- **ByteTrack 参数真正生效**：自定义 `configs/bytetrack.yaml`（track_buffer 等），
+  目标短暂漏检时 ByteTrack 自己保持 track_id。
+- **画面内绝不分裂 ID**：画面内消失的目标暂存 10 秒（位置外推 + HSV 外观直方图匹配），
+  重新出现复用原 `person_id` 与工装状态；JSON 输出 `person_restored`/`restored_from`。
+- **只有真正走出画面才释放**：检测框可见面积 <40% 视为离开（被画面裁切的目标不算），
+  释放后再次进入按新 ID 处理。
+- **新 ID 确认期**：连续 3 帧稳定才分配正式 `person_id`，短命误检不再消耗 ID。
+
 ## 实时性与性能
 
 - 首帧推理较慢（模型加载 + CUDA 预热，约 1-2 秒），之后单帧约 15-20ms（GPU）。

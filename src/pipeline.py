@@ -62,6 +62,15 @@ class DetectionPipeline:
             new_track_thresh=tcfg["new_track_thresh"],
             detector=self.detector,   # 共享 YOLO 实例，避免重复推理
             merge_overlap_iou=float(tcfg.get("merge_overlap_iou", 0.3)),
+            tracker_yaml=str(
+                ByteTrackTracker.write_tracker_yaml(
+                    Path("configs") / "bytetrack.yaml",
+                    track_buffer=int(tcfg["lost_buffer"]),
+                    track_high_thresh=float(tcfg["track_high_thresh"]),
+                    track_low_thresh=float(tcfg["track_low_thresh"]),
+                    new_track_thresh=float(tcfg["new_track_thresh"]),
+                )
+            ),
         )
         self.uniform = UniformClassifier(
             roi_main=_RoiSpec(
@@ -92,11 +101,15 @@ class DetectionPipeline:
             uniform_pending_frames=int(icfg.get("uniform_pending_frames", 10)),
             uniform_window=int(icfg.get("uniform_window", 30)),
             uniform_confirm_frames=int(icfg.get("uniform_confirm_frames", 60)),
-            uniform_confirm_high=float(icfg.get("uniform_confirm_high", 0.9)),
-            reverse_streak_frames=int(icfg.get("reverse_streak_frames", 5)),
-            track_ttl_frames=int(icfg.get("track_ttl_frames", 90)),
-            match_distance_factor=float(icfg.get("match_distance_factor", 1.5)),
-        )
+              uniform_confirm_high=float(icfg.get("uniform_confirm_high", 0.9)),
+              reverse_streak_frames=int(icfg.get("reverse_streak_frames", 5)),
+              track_ttl_frames=int(icfg.get("track_ttl_frames", 300)),
+              boundary_ttl_frames=int(icfg.get("boundary_ttl_frames", 60)),
+              match_distance_factor=float(icfg.get("match_distance_factor", 2.5)),
+              appearance_corr_threshold=float(icfg.get("appearance_corr_threshold", 0.85)),
+              person_confirm_frames=int(icfg.get("person_confirm_frames", 3)),
+              leave_visible_ratio=float(icfg.get("leave_visible_ratio", 0.4)),
+          )
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
         self.detector.load()
 
@@ -118,7 +131,7 @@ class DetectionPipeline:
             uniform_results[obj.track_id] = self.uniform.classify(frame_bgr, obj)
         t2 = time.perf_counter()
 
-        persons = self.identity.update(frame_id, tracked, uniform_results)
+        persons = self.identity.update(frame_id, frame_bgr, tracked, uniform_results)
         records: list[dict[str, Any]] = []
         uniform_count = 0
         for p in persons:
