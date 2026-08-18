@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch_p.add_argument("--json-dir", default=None, help="JSON 输出目录（默认 outputs/json）")
     batch_p.add_argument("--mp4-dir", default=None, help="视频输出目录（默认 outputs/mp4）")
     batch_p.add_argument("--max-frames", type=int, default=0, help="每个视频最多处理 N 帧（0=不限制）")
+    batch_p.add_argument("--workers", type=int, default=None, help="并行进程数（默认取 config 的 batch.workers）")
 
     cal_p = sub.add_parser("calibrate", help="交互标定 HSV / ROI 参数")
     cal_p.add_argument("image", help="现场截图路径")
@@ -106,26 +107,53 @@ def run_batch(cfg: dict, args: argparse.Namespace) -> None:
 
     json_dir.mkdir(parents=True, exist_ok=True)
     mp4_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[batch] 找到 {len(videos)} 个视频，开始处理...")
+    workers = args.workers if args.workers is not None else int(bcfg.get("workers", 1))
+    print(f"[batch] 找到 {len(videos)} 个视频（并行进程数 {workers}），开始处理...")
 
-    for idx, video in enumerate(videos, start=1):
-        stem = re.sub(r"[^\w\-]+", "_", video.stem)
-        json_path = json_dir / f"{stem}.jsonl"
-        mp4_path = mp4_dir / f"{stem}.mp4"
-        print(f"[batch] ({idx}/{len(videos)}) {video.name} -> {mp4_path.name}")
-        pipeline = DetectionPipeline(cfg)
-        pipeline.max_frames = args.max_frames
-        cfg["output"]["show"] = bool(cfg["output"].get("show", True))
-        stats = pipeline.run(
-            str(video),
-            json_path=json_path,
-            save_video=str(mp4_path),
-        )
-        print(
-            f"[batch] 完成 {video.name}：{stats.frames_processed} 帧，"
-            f"人次 {stats.persons_total}，工装人次 {stats.uniform_count}"
-        )
+    if workers <= 1:
+        for idx, video in enumerate(videos, start=1):
+            _batch_process_one(cfg, video, json_dir, mp4_dir, args.max_frames, idx, len(videos))
+    else:
+        from concurrent.futures import ProcessPoolExecutor
+
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futures = [
+                ex.submit(_batch_process_one, cfg, video, json_dir, mp4_dir, args.max_frames, idx, len(videos))
+                for idx, video in enumerate(videos, start=1)
+            ]
+            for f in futures:
+                f.result()  # 异常在此抛出，保证结果按顺序汇总
     print(f"[batch] 全部完成，共 {len(videos)} 个视频。")
+
+
+def _batch_process_one(
+    cfg: dict,
+    video: Path,
+    json_dir: Path,
+    mp4_dir: Path,
+    max_frames: int,
+    idx: int,
+    total: int,
+) -> None:
+    """处理单个视频（供 batch 串行/并行调用）。"""
+    import re
+
+    stem = re.sub(r"[^\w\-]+", "_", video.stem)
+    json_path = json_dir / f"{stem}.jsonl"
+    mp4_path = mp4_dir / f"{stem}.mp4"
+    print(f"[batch] ({idx}/{total}) {video.name} -> {mp4_path.name}")
+    pipeline = DetectionPipeline(cfg)
+    pipeline.max_frames = max_frames
+    cfg["output"]["show"] = False  # 批处理不弹窗
+    stats = pipeline.run(
+        str(video),
+        json_path=json_path,
+        save_video=str(mp4_path),
+    )
+    print(
+        f"[batch] 完成 {video.name}：{stats.frames_processed} 帧，"
+        f"人次 {stats.persons_total}，工装人次 {stats.uniform_count}"
+    )
 
 
 if __name__ == "__main__":

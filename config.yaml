@@ -64,6 +64,7 @@ batch:
   json_dir: "outputs/json"         # 批量 JSON 输出目录
   mp4_dir: "outputs/mp4"           # 批量视频输出目录
   extensions: [".mp4", ".avi", ".mov"]  # 支持的输入格式
+  workers: 1                       # 批量并行进程数（每个进程独立加载模型；GPU 显存有限，建议 1-2）
 
 evaluate:
   sample_every_n_frames: 30   # evaluate.py 抽帧间隔
