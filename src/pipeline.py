@@ -89,8 +89,11 @@ class DetectionPipeline:
         self._should_draw: bool = False  # 由 run() 按 save_video/show 决定
         icfg = self.config.get("identity", {})
         self.identity = IdentityTracker(
-            uniform_window=int(icfg.get("uniform_window", 10)),
-            uniform_lock_high=float(icfg.get("uniform_lock_high", 0.8)),
+            uniform_pending_frames=int(icfg.get("uniform_pending_frames", 10)),
+            uniform_window=int(icfg.get("uniform_window", 30)),
+            uniform_confirm_frames=int(icfg.get("uniform_confirm_frames", 60)),
+            uniform_confirm_high=float(icfg.get("uniform_confirm_high", 0.9)),
+            reverse_streak_frames=int(icfg.get("reverse_streak_frames", 5)),
             track_ttl_frames=int(icfg.get("track_ttl_frames", 90)),
             match_distance_factor=float(icfg.get("match_distance_factor", 1.5)),
         )

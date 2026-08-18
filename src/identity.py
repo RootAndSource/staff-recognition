@@ -18,8 +18,9 @@ import numpy as np
 from .uniform import UniformResult
 
 
-UNIFORM_LOCKED = "locked"
+UNIFORM_PENDING = "pending"
 UNIFORM_ACTIVE = "active"
+UNIFORM_CONFIRMED = "confirmed"
 
 
 @dataclass
@@ -30,9 +31,11 @@ class PersonObject:
     bt_id: int                      # 底层 ByteTrack track_id（调试用）
     xyxy: np.ndarray
     confidence: float
-    uniform: bool                   # 最终工装标签（锁定或实时）
-    uniform_state: str              # "locked" / "active"
+    uniform: bool | None            # 最终工装标签（pending 阶段为 None）
+    uniform_state: str              # "pending" / "active" / "confirmed"
     uniform_prob: float             # 当前工装概率（0-1）
+    red_ratio_connected: float = 0.0   # 最大红色连通域占比（判定依据）
+    baseline_ratio: float = 0.0        # 场景红色基线（判定依据）
 
 
 @dataclass
@@ -48,6 +51,8 @@ class _StoredTrack:
     uniform_state: str
     uniform_prob: float
     uniform_history: list[bool] = field(default_factory=list)
+    reverse_streak: int = 0         # 反向证据连续帧数
+    confirmed_frames: int = 0       # 高置信态已持续帧数
 
 
 @dataclass
@@ -59,6 +64,9 @@ class _PersonState:
     uniform: bool | None = None
     uniform_state: str = UNIFORM_ACTIVE
     uniform_prob: float = 0.5
+    reverse_streak: int = 0         # 与当前标签相反的证据连续帧数
+    confirmed_frames: int = 0       # 高置信态已持续帧数
+    total_frames: int = 0           # 已观察总帧数
     last_center: np.ndarray | None = None
     last_box: np.ndarray | None = None
     last_velocity: np.ndarray | None = None
@@ -91,20 +99,26 @@ class IdentityTracker:
 
     职责：
     - 维护 ByteTrack track_id → 稳定 person_id 的映射；
-    - 工装标签滑动窗口概率判定 + 已穿单向锁定；
+    - 工装标签延迟态状态机（PENDING/ACTIVE/CONFIRMED），翻转需要连续反向证据；
     - 轨迹暂存恢复（位置匹配复用旧 ID 与工装状态）。
     """
 
     def __init__(
         self,
         *,
-        uniform_window: int = 10,
-        uniform_lock_high: float = 0.8,
+        uniform_pending_frames: int = 10,   # 观察期帧数
+        uniform_window: int = 30,           # ACTIVE 滑动窗口（约 1 秒 @30fps）
+        uniform_confirm_frames: int = 60,   # 高置信态所需一致帧数（约 2 秒）
+        uniform_confirm_high: float = 0.9,  # 高置信态概率要求
+        reverse_streak_frames: int = 5,     # 翻转所需连续反向证据帧数
         track_ttl_frames: int = 90,          # 3 秒 @30fps
         match_distance_factor: float = 1.5,  # 匹配距离 = 框宽 * factor
     ) -> None:
+        self.uniform_pending_frames = uniform_pending_frames
         self.uniform_window = uniform_window
-        self.uniform_lock_high = uniform_lock_high
+        self.uniform_confirm_frames = uniform_confirm_frames
+        self.uniform_confirm_high = uniform_confirm_high
+        self.reverse_streak_frames = reverse_streak_frames
         self.track_ttl_frames = track_ttl_frames
         self.match_distance_factor = match_distance_factor
 
@@ -125,20 +139,61 @@ class IdentityTracker:
         raw_uniform: bool,
         raw_result: UniformResult,
     ) -> None:
-        """滑动窗口概率更新 + 单向锁定（已穿锁定，未穿可升级）。"""
-        if state.uniform_state == UNIFORM_LOCKED:
-            return  # 已穿工装：永久锁定，不再变化
+        """延迟态状态机更新。
+
+        PENDING：观察期只积累证据；
+        ACTIVE：窗口多数票输出标签，翻转需要连续反向证据（翻转惯性）；
+        CONFIRMED：长时间高一致标记高置信，但仍可被长期反证翻转。
+        """
+        state.total_frames += 1
+        if state.total_frames < self.uniform_pending_frames:
+            state.uniform_state = UNIFORM_PENDING
+            state.uniform = None
+            state.uniform_prob = 0.5
+            return
+
         state.uniform_history.append(raw_uniform)
         if len(state.uniform_history) > self.uniform_window:
             state.uniform_history.pop(0)
         prob = sum(state.uniform_history) / len(state.uniform_history)
         state.uniform_prob = prob
-        if len(state.uniform_history) >= self.uniform_window:
-            if prob >= self.uniform_lock_high:
-                state.uniform = True
-                state.uniform_state = UNIFORM_LOCKED
+
+        # 翻转判定基于原始单帧观测（不被窗口惯性掩盖）
+        if state.uniform is None:
+            state.uniform = raw_uniform
+            state.uniform_state = UNIFORM_ACTIVE
+            state.reverse_streak = 0
+            state.confirmed_frames = 0
+            return
+
+        if raw_uniform != state.uniform:
+            state.reverse_streak += 1
+            if state.reverse_streak >= self.reverse_streak_frames:
+                # 连续反向证据足够 → 翻转（延迟态：有惯性，但不固化）
+                state.uniform = raw_uniform
+                state.reverse_streak = 0
+                state.confirmed_frames = 0
+        else:
+            state.reverse_streak = 0
+            # 反向证据中断时清空窗口中的旧标签证据，避免旧证据拖住新状态
+            if state.uniform is not None:
+                state.uniform_history = [
+                    u for u in state.uniform_history if u == state.uniform
+                ] or [state.uniform]
+
+        if state.uniform_state != UNIFORM_CONFIRMED:
+            state.uniform_state = UNIFORM_ACTIVE
+
+        # 高置信态：长时间一致 + 概率高（仅作为标记，不阻止翻转）
+        if state.uniform is not None:
+            if state.reverse_streak == 0 and sum(state.uniform_history) >= self.uniform_confirm_high * len(state.uniform_history):
+                state.confirmed_frames += 1
+                if state.confirmed_frames >= self.uniform_confirm_frames:
+                    state.uniform_state = UNIFORM_CONFIRMED
             else:
-                state.uniform = prob >= 0.5
+                state.confirmed_frames = 0
+                if state.uniform_state == UNIFORM_CONFIRMED:
+                    state.uniform_state = UNIFORM_ACTIVE
 
     def _try_restore(self, center: np.ndarray, box: np.ndarray, frame_id: int) -> int | None:
         """尝试把新检测框与暂存轨迹匹配；成功返回 person_id。"""
@@ -161,6 +216,9 @@ class IdentityTracker:
                 uniform=st.uniform,
                 uniform_state=st.uniform_state,
                 uniform_prob=st.uniform_prob,
+                reverse_streak=st.reverse_streak,
+                confirmed_frames=st.confirmed_frames,
+                total_frames=len(st.uniform_history),
             )
             self._persons[best_id] = state
             return best_id
@@ -208,7 +266,9 @@ class IdentityTracker:
             if raw is not None:
                 self._update_uniform(state, raw.is_uniform, raw)
 
-            uniform = bool(state.uniform) if state.uniform is not None else raw.is_uniform if raw else False
+            uniform = state.uniform  # pending 阶段为 None，其余为 bool
+            connected = raw.red_ratio_connected if raw is not None else 0.0
+            baseline = raw.baseline_ratio if raw is not None else 0.0
             objects.append(
                 PersonObject(
                     person_id=person_id,
@@ -218,6 +278,8 @@ class IdentityTracker:
                     uniform=uniform,
                     uniform_state=state.uniform_state,
                     uniform_prob=state.uniform_prob,
+                    red_ratio_connected=connected,
+                    baseline_ratio=baseline,
                 )
             )
 

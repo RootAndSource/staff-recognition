@@ -65,5 +65,7 @@ def build_person_record(
         "uniform": person.uniform,
         "uniform_state": person.uniform_state,
         "uniform_prob": round(person.uniform_prob, 4),
+        "red_ratio_connected": round(person.red_ratio_connected, 4),
+        "baseline_ratio": round(person.baseline_ratio, 4),
         "confidence": round(person.confidence, 4),
     }

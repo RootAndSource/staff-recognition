@@ -42,12 +42,17 @@ uniform:
     s_min: 70              # 现场标定（下调以适配背光/桌面反光）
     v_min: 70              # 现场标定
   red_ratio_threshold: 0.08   # 红色像素占比阈值（实测坐姿 ROI 红色占比 0.02-0.07）
+  baseline_factor: 1.5        # ROI 红色占比需 >= 基线 * factor 才算工装
+  connected_min_ratio: 0.05   # 最大红色连通域占 ROI 最小比例（工装成块先验）
   normalize: true          # 是否先做直方图均衡化（降低光照影响）
   smooth_window: 5         # 工装标签时间平滑窗口（帧数），连续多帧稳定后翻转
 
 identity:
-  uniform_window: 10       # 工装概率滑动窗口（帧），0.3 秒 @30fps
-  uniform_lock_high: 0.8   # 概率 >= 0.8 锁定为“已穿工装”
+  uniform_pending_frames: 10    # 观察期帧数（只积累，不输出标签）
+  uniform_window: 30            # ACTIVE 滑动窗口（约 1 秒 @30fps）
+  uniform_confirm_frames: 60    # 高置信态所需一致帧数（约 2 秒）
+  uniform_confirm_high: 0.9     # 高置信态概率要求
+  reverse_streak_frames: 5      # 标签翻转所需连续反向证据帧数（翻转惯性）
   track_ttl_frames: 90     # 轨迹暂存时长（帧），3 秒 @30fps；超过释放 ID
   match_distance_factor: 1.5  # 遮挡后恢复 ID 的匹配距离（框宽 * factor）
 
