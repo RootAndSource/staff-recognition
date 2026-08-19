@@ -102,6 +102,17 @@ python main.py evaluate --video data/videos/005.mp4 --frames 100
   释放后再次进入按新 ID 处理。
 - **新 ID 确认期**：连续 3 帧稳定才分配正式 `person_id`，短命误检不再消耗 ID。
 
+## v0.6：BoT-SORT + ReID（按方案 v0.2 M1）
+
+- 跟踪器升级为 **BoT-SORT（运动 + ReID 外观融合关联）**（ultralytics 内置，
+  `configs/botsort.yaml`，`with_reid: true`），替换纯运动 ByteTrack；
+  ReID 额外开销实测仅 ~0.4ms/帧。
+- 固定机位关闭相机运动补偿（`gmc_method: none`）；
+  `appearance_thresh=0.8` 防 ID 交换，`track_buffer=150`（5 秒）保持轨迹。
+- 完整视频（28182 帧）实测：唯一 person_id 30 → 24，工装翻转 532 → 489。
+- 验收口径（已确定，2026-08-19，见 docs/requirements v0.3）：
+  短时遮挡（≤3 秒）恢复率 ≥80%；连续可见期间 ID 切换为 0（目标值）。
+
 ## 实时性与性能
 
 - 首帧推理较慢（模型加载 + CUDA 预热，约 1-2 秒），之后单帧约 15-20ms（GPU）。

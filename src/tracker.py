@@ -87,12 +87,15 @@ class ByteTrackTracker:
         track_high_thresh: float,
         track_low_thresh: float,
         new_track_thresh: float,
+        tracker_type: str = "bytetrack",
+        with_reid: bool = False,
+        appearance_thresh: float = 0.8,
     ) -> Path:
-        """写出自定义 ByteTrack 配置（track_buffer 等参数真正生效）。"""
+        """写出自定义跟踪器配置（track_buffer 等参数真正生效）。"""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         cfg = {
-            "tracker_type": "bytetrack",
+            "tracker_type": tracker_type,
             "track_high_thresh": track_high_thresh,
             "track_low_thresh": track_low_thresh,
             "new_track_thresh": new_track_thresh,
@@ -100,6 +103,16 @@ class ByteTrackTracker:
             "match_thresh": 0.8,
             "fuse_score": True,
         }
+        if tracker_type == "botsort":
+            cfg.update(
+                {
+                    "gmc_method": "none",  # 固定机位，关闭相机运动补偿
+                    "proximity_thresh": 0.5,
+                    "appearance_thresh": appearance_thresh,
+                    "with_reid": with_reid,
+                    "model": "auto",
+                }
+            )
         p.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
         return p
 

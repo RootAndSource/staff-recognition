@@ -56,7 +56,7 @@ class DetectionPipeline:
         )
         self.min_box_size = int(mcfg.get("min_box_size", 0))
         self.tracker = ByteTrackTracker(
-            lost_buffer=tcfg["lost_buffer"],
+            lost_buffer=tcfg["track_buffer"],
             track_high_thresh=tcfg["track_high_thresh"],
             track_low_thresh=tcfg["track_low_thresh"],
             new_track_thresh=tcfg["new_track_thresh"],
@@ -65,10 +65,13 @@ class DetectionPipeline:
             tracker_yaml=str(
                 ByteTrackTracker.write_tracker_yaml(
                     Path("configs") / "bytetrack.yaml",
-                    track_buffer=int(tcfg["lost_buffer"]),
+                    track_buffer=int(tcfg["track_buffer"]),
                     track_high_thresh=float(tcfg["track_high_thresh"]),
                     track_low_thresh=float(tcfg["track_low_thresh"]),
                     new_track_thresh=float(tcfg["new_track_thresh"]),
+                    tracker_type=str(tcfg.get("name", "botsort")),
+                    with_reid=bool(tcfg.get("with_reid", True)),
+                    appearance_thresh=float(tcfg.get("appearance_thresh", 0.8)),
                 )
             ),
         )

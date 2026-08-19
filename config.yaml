@@ -16,12 +16,14 @@ model:
   min_box_size: 24         # 检测框最小短边（像素），过滤过小噪声
 
 tracker:
-  name: "bytetrack"        # 当前仅 bytetrack；预留 oc-sort / strongsort 切换位
-  lost_buffer: 30          # 轨迹丢失缓冲帧数
+  name: "botsort"          # BoT-SORT（运动 + ReID 外观融合关联）
+  track_buffer: 150        # 轨迹丢失缓冲帧数（5 秒 @30fps）
   track_high_thresh: 0.3   # 轨迹确认阈值（坐姿目标多为 0.2-0.45，0.5 会漏掉）
   track_low_thresh: 0.1    # 低分框阈值
   new_track_thresh: 0.6    # 新轨迹确认阈值
   merge_overlap_iou: 0.3   # 同帧重复框合并阈值（趴姿“小框+大框”场景）
+  with_reid: true          # 启用 ReID 外观特征参与关联（BoT-SORT 核心）
+  appearance_thresh: 0.8   # ReID 外观相似度阈值（防 ID 交换）
 
 uniform:
   roi_main:                # 主 ROI：肩胸（相对于检测框，0-1）
