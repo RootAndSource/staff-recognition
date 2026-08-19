@@ -118,6 +118,15 @@ python main.py evaluate --video data/videos/005.mp4 --frames 100
   专用 ReID 模型（OSNet 级）是后续升级点。
 - `scripts/evaluate_id.py <jsonl>` 自动评估短时遮挡恢复率（验收口径 ≥80%）。
 
+## M2：检测微调数据流（方案 v0.2）
+
+- `scripts/prepare_finetune.py`：从 `data/preprocessed/` 均匀抽帧（默认每视频 25 帧，
+  共 375 帧）到 `data/finetune/frames/`，可选 `--auto-label` 用 yolo11x 生成
+  YOLO 格式 person 伪标签。
+- 伪标签建议先用 CVAT 人工修正（补坐姿/遮挡漏检、删雨伞等误检）后再训练。
+- `scripts/train_detector.py`：划分 train/val 并生成 data.yaml，调用 ultralytics
+  微调（erasing=0.4、mosaic、copy_paste）；`--dry-run` 只准备数据不训练。
+
 ## 实时性与性能
 
 - 首帧推理较慢（模型加载 + CUDA 预热，约 1-2 秒），之后单帧约 15-20ms（GPU）。
