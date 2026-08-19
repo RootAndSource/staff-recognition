@@ -67,6 +67,7 @@ def main() -> None:
     parser.add_argument("--imgsz", type=int, default=960)
     parser.add_argument("--device", default="0")
     parser.add_argument("--val-ratio", type=float, default=0.15)
+    parser.add_argument("--patience", type=int, default=15, help="验证集无提升时早停的 epoch 数")
     parser.add_argument("--dry-run", action="store_true", help="只准备数据并打印命令，不训练")
     args = parser.parse_args()
 
@@ -81,7 +82,7 @@ def main() -> None:
     cmd = (
         f"yolo detect train model={args.weights} data={data_yaml} "
         f"epochs={args.epochs} batch={args.batch} imgsz={args.imgsz} "
-        f"device={args.device} project=runs/finetune name=person "
+        f"device={args.device} patience={args.patience} project=runs/finetune name=person "
         # Random Erasing（遮挡鲁棒）等增强由 ultralytics 默认开启的 augment 参数控制，
         # 也可追加 erasing=0.4 mosaic=1.0 copy_paste=0.3
     )
@@ -97,6 +98,7 @@ def main() -> None:
             batch=args.batch,
             imgsz=args.imgsz,
             device=args.device,
+            patience=args.patience,
             project="runs/finetune",
             name="person",
             erasing=0.4,

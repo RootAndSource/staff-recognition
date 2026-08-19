@@ -8,7 +8,7 @@ video:
   rtsp_timeout_ms: 5000    # RTSP 打开超时（毫秒）
 
 model:
-  weights: "models/yolo11x.pt"          # yolo11m 在遮挡/坐姿场景检出率与置信度显著优于 11n
+  weights: "models/yolo11x_finetuned.pt"  # 现场微调版（M2 完成，mAP50=0.965）
   conf_thres: 0.25         # 检测置信度阈值（11m 下坐姿目标置信度 0.3-0.9，可保持 0.25）
   iou_thres: 0.5           # NMS IoU 阈值
   imgsz: 960               # 推理输入尺寸
