@@ -90,6 +90,7 @@ class ByteTrackTracker:
         tracker_type: str = "bytetrack",
         with_reid: bool = False,
         appearance_thresh: float = 0.8,
+        reid_model: str = "auto",
     ) -> Path:
         """写出自定义跟踪器配置（track_buffer 等参数真正生效）。"""
         p = Path(path)
@@ -110,7 +111,7 @@ class ByteTrackTracker:
                     "proximity_thresh": 0.5,
                     "appearance_thresh": appearance_thresh,
                     "with_reid": with_reid,
-                    "model": "auto",
+                    "model": reid_model,
                 }
             )
         p.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")

@@ -72,6 +72,7 @@ class DetectionPipeline:
                     tracker_type=str(tcfg.get("name", "botsort")),
                     with_reid=bool(tcfg.get("with_reid", True)),
                     appearance_thresh=float(tcfg.get("appearance_thresh", 0.8)),
+                    reid_model=str(tcfg.get("reid_model", "auto")),
                 )
             ),
         )
