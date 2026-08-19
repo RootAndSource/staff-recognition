@@ -112,6 +112,11 @@ python main.py evaluate --video data/videos/005.mp4 --frames 100
 - 完整视频（28182 帧）实测：唯一 person_id 30 → 24，工装翻转 532 → 489。
 - 验收口径（已确定，2026-08-19，见 docs/requirements v0.3）：
   短时遮挡（≤3 秒）恢复率 ≥80%；连续可见期间 ID 切换为 0（目标值）。
+- ReID 当前用检测器特征（`reid_model: auto`，零额外开销）；
+  `scripts/calibrate_reid.py` 可标定阈值。实测 yolo26n-cls 通用特征
+  在统一工装场景下同人/异人区分度有限（p5=0.940 vs p95=0.943 重叠），
+  专用 ReID 模型（OSNet 级）是后续升级点。
+- `scripts/evaluate_id.py <jsonl>` 自动评估短时遮挡恢复率（验收口径 ≥80%）。
 
 ## 实时性与性能
 

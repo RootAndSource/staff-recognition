@@ -24,6 +24,7 @@ tracker:
   merge_overlap_iou: 0.3   # 同帧重复框合并阈值（趴姿“小框+大框”场景）
   with_reid: true          # 启用 ReID 外观特征参与关联（BoT-SORT 核心）
   appearance_thresh: 0.8   # ReID 外观相似度阈值（防 ID 交换）
+  reid_model: "auto"       # auto=用检测器特征做 ReID（免费）；可换专用模型路径
 
 uniform:
   roi_main:                # 主 ROI：肩胸（相对于检测框，0-1）
