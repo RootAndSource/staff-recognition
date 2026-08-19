@@ -80,11 +80,20 @@ def main() -> None:
     val_loader = DataLoader(val_ds, batch_size=args.batch, shuffle=False,
                             num_workers=2, pin_memory=True)
 
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{args.device}" if args.device.isdigit() else args.device)
+    else:
+        device = torch.device("cpu")
     model = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.IMAGENET1K_V1)
     model.classifier[3] = nn.Linear(model.classifier[3].in_features, 2)
     model = model.to(device)
-    criterion = nn.CrossEntropyLoss()
+    # 类别权重（inverse frequency），缓解工装/非工装样本不平衡
+    counts = torch.tensor([n_neg, n_pos], dtype=torch.float32)
+    total = counts.sum()
+    class_weight = total / (2.0 * counts.clamp(min=1))
+    class_weight = class_weight.to(device)
+    print(f"类别权重（negative/positive）: {class_weight.tolist()}")
+    criterion = nn.CrossEntropyLoss(weight=class_weight)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
