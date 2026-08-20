@@ -28,7 +28,7 @@ class PersonObject:
     """IdentityTracker 输出的稳定人员对象。"""
 
     person_id: int
-    bt_id: int                      # 底层 ByteTrack track_id（调试用）
+    bt_id: str                      # 底层 ByteTrack track_id（调试用）
     xyxy: np.ndarray
     confidence: float
     uniform: bool | None            # 工装标签（pending 阶段为 None）
@@ -62,7 +62,7 @@ class _StoredTrack:
 class _PendingCandidate:
     """新 track_id 确认期候选（连续 N 帧稳定才分配正式 person_id）。"""
 
-    bt_id: int
+    bt_id: str
     first_frame: int
     last_frame: int
     last_center: np.ndarray
@@ -141,10 +141,10 @@ class IdentityTracker:
         self.person_confirm_frames = person_confirm_frames
         self.leave_visible_ratio = leave_visible_ratio
 
-        self._bt_to_person: dict[int, int] = {}
+        self._bt_to_person: dict[str, int] = {}
         self._persons: dict[int, _PersonState] = {}
         self._stored: dict[int, _StoredTrack] = {}
-        self._pending: dict[int, _PendingCandidate] = {}
+        self._pending: dict[str, _PendingCandidate] = {}
         self._next_person_id = 1
         self.stats = {"restored": 0, "released_boundary": 0, "new_persons": 0}
 
@@ -369,7 +369,7 @@ class IdentityTracker:
         objects: list[PersonObject] = []
 
         for obj in tracked:
-            bt_id = obj.track_id
+            bt_id = getattr(obj, "bt_key", None) or f"t{obj.track_id}"
             box = obj.xyxy
             center = np.array([(box[0] + box[2]) / 2, (box[1] + box[3]) / 2])
 
@@ -416,6 +416,8 @@ class IdentityTracker:
             new_person_ids.add(person_id)
 
             raw = uniform_results.get(bt_id)
+            if raw is None:
+                raw = uniform_results.get(getattr(obj, "track_id", None))
             if raw is not None:
                 self._update_uniform(state, raw.is_uniform, raw)
 
@@ -443,7 +445,7 @@ class IdentityTracker:
                 )
                 del self._persons[pid]
 
-        active_bt = {o.track_id for o in tracked}
+        active_bt = {getattr(o, "bt_key", None) or f"t{o.track_id}" for o in tracked}
         self._bt_to_person = {
             bt: pid for bt, pid in self._bt_to_person.items() if bt in active_bt
         }

@@ -20,6 +20,8 @@ class FusedDetection:
     confidence: float
     box_type: str                 # "upper" / "full"
     upper_roi: tuple[int, int, int, int]  # 推导的上半身 ROI（像素）
+    bt_key: str = ""                # ?????? u3/f7???????
+    is_confirmed: bool = True
 
 
 def _iou(a: np.ndarray, b: np.ndarray) -> float:
@@ -76,15 +78,15 @@ class DetectionFusion:
 
     def fuse(
         self,
-        upper_dets: list[tuple[np.ndarray, float]],
-        full_dets: list[tuple[np.ndarray, float]],
+        upper_dets: list[tuple[int, np.ndarray, float]],
+        full_dets: list[tuple[int, np.ndarray, float]],
         frame_w: int,
         frame_h: int,
     ) -> list[FusedDetection]:
         """融合两类检测框，输出每人一个主框。"""
         # 1. 同类 NMS
-        upper_kept = self._nms([d[0] for d in upper_dets], [d[1] for d in upper_dets], self.same_class_nms)
-        full_kept = self._nms([d[0] for d in full_dets], [d[1] for d in full_dets], self.same_class_nms)
+        upper_kept = self._nms([d[1] for d in upper_dets], [d[2] for d in upper_dets], self.same_class_nms)
+        full_kept = self._nms([d[1] for d in full_dets], [d[2] for d in full_dets], self.same_class_nms)
         uppers = [upper_dets[i] for i in upper_kept]
         fulls = [full_dets[i] for i in full_kept]
 
@@ -92,11 +94,11 @@ class DetectionFusion:
         results: list[FusedDetection] = []
 
         # 2. upper 优先：与 full 匹配 → 用 upper
-        for ubox, uconf in uppers:
+        for utid, ubox, uconf in uppers:
             uc = np.array([(ubox[0] + ubox[2]) / 2, (ubox[1] + ubox[3]) / 2])
             best = None
             best_iou = 0.0
-            for j, (fbox, _) in enumerate(fulls):
+            for j, (ftid, fbox, fconf) in enumerate(fulls):
                 if used_full[j]:
                     continue
                 fb = np.array(fbox)
@@ -114,18 +116,20 @@ class DetectionFusion:
                 FusedDetection(
                     xyxy=np.array(ubox, dtype=float),
                     confidence=uconf,
+                    bt_key=f"u{utid}",
                     box_type="upper",
                     upper_roi=_upper_roi_from_full(ubox, frame_w, frame_h, 1.0),
                 )
             )
 
         # 3. 未匹配的 full 兜底保留
-        for j, (fbox, fconf) in enumerate(fulls):
+        for j, (ftid, fbox, fconf) in enumerate(fulls):
             if not used_full[j]:
                 results.append(
                     FusedDetection(
                         xyxy=np.array(fbox, dtype=float),
                         confidence=fconf,
+                    bt_key=f"f{ftid}",
                         box_type="full",
                         upper_roi=_upper_roi_from_full(fbox, frame_w, frame_h, self.upper_ratio),
                     )

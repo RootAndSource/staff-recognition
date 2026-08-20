@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from .config import load_config
 from .detector import PersonDetector
+from .fusion import DetectionFusion
 from .identity import IdentityTracker
 from .output import JsonOutputWriter, build_person_record
 from .tracker import ByteTrackTracker
@@ -47,34 +48,51 @@ class DetectionPipeline:
         )
         self.video_cfg = vcfg
         self.output_cfg = ocfg
-        self.detector = PersonDetector(
-            weights=mcfg["weights"],
+        self.min_box_size = int(mcfg.get("min_box_size", 0))
+        self.full_interval = int(mcfg.get("full_interval", 3))
+        upper_w = mcfg.get("upper_weights") or mcfg["weights"]
+        full_w = mcfg.get("full_weights") or mcfg["weights"]
+        self.upper_detector = PersonDetector(
+            weights=upper_w,
             conf_thres=mcfg["conf_thres"],
             iou_thres=mcfg["iou_thres"],
             imgsz=mcfg["imgsz"],
             device=mcfg.get("device", ""),
         )
-        self.min_box_size = int(mcfg.get("min_box_size", 0))
-        self.tracker = ByteTrackTracker(
-            track_high_thresh=tcfg["track_high_thresh"],
-            track_low_thresh=tcfg["track_low_thresh"],
-            new_track_thresh=tcfg["new_track_thresh"],
-            detector=self.detector,   # 共享 YOLO 实例，避免重复推理
-            merge_overlap_iou=float(tcfg.get("merge_overlap_iou", 0.3)),
-            tracker_yaml=str(
-                ByteTrackTracker.write_tracker_yaml(
-                    Path("configs") / "bytetrack.yaml",
-                    track_buffer=int(tcfg["track_buffer"]),
-                    track_high_thresh=float(tcfg["track_high_thresh"]),
-                    track_low_thresh=float(tcfg["track_low_thresh"]),
-                    new_track_thresh=float(tcfg["new_track_thresh"]),
-                    tracker_type=str(tcfg.get("name", "botsort")),
-                    with_reid=bool(tcfg.get("with_reid", True)),
-                    appearance_thresh=float(tcfg.get("appearance_thresh", 0.8)),
-                    reid_model=str(tcfg.get("reid_model", "auto")),
-                )
-            ),
+        self.full_detector = PersonDetector(
+            weights=full_w,
+            conf_thres=mcfg["conf_thres"],
+            iou_thres=mcfg["iou_thres"],
+            imgsz=mcfg["imgsz"],
+            device=mcfg.get("device", ""),
         )
+        self.detector = self.upper_detector  # ?????
+
+        def _make_tracker(det):
+            return ByteTrackTracker(
+                track_high_thresh=tcfg["track_high_thresh"],
+                track_low_thresh=tcfg["track_low_thresh"],
+                new_track_thresh=tcfg["new_track_thresh"],
+                detector=det,
+                merge_overlap_iou=float(tcfg.get("merge_overlap_iou", 0.3)),
+                tracker_yaml=str(
+                    ByteTrackTracker.write_tracker_yaml(
+                        Path("configs") / "bytetrack.yaml",
+                        track_buffer=int(tcfg["track_buffer"]),
+                        track_high_thresh=float(tcfg["track_high_thresh"]),
+                        track_low_thresh=float(tcfg["track_low_thresh"]),
+                        new_track_thresh=float(tcfg["new_track_thresh"]),
+                        tracker_type=str(tcfg.get("name", "botsort")),
+                        with_reid=bool(tcfg.get("with_reid", True)),
+                        appearance_thresh=float(tcfg.get("appearance_thresh", 0.8)),
+                        reid_model=str(tcfg.get("reid_model", "auto")),
+                    )
+                ),
+            )
+
+        self.upper_tracker = _make_tracker(self.upper_detector)
+        self.full_tracker = _make_tracker(self.full_detector)
+        self.tracker = self.upper_tracker  # ?????
         self.uniform = UniformClassifier(
             roi_main=_RoiSpec(
                 ucfg["roi_main"]["x_begin"], ucfg["roi_main"]["y_begin"],
@@ -115,7 +133,9 @@ class DetectionPipeline:
               leave_visible_ratio=float(icfg.get("leave_visible_ratio", 0.4)),
           )
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
-        self.detector.load()
+        self.fusion = DetectionFusion()
+        self.upper_detector.load()
+        self.full_detector.load()
 
     def _process_frame(
         self,
@@ -123,19 +143,35 @@ class DetectionPipeline:
         frame_id: int,
         timestamp_ms: float,
     ) -> tuple[list[dict[str, Any]], int, int]:
-        """单帧处理：返回 (json_records, 人数, 工装人数)。"""
-        # ByteTrack 的 track() 内部已包含检测，不重复调用 detect()
+        """??????? (json_records, ??, ????)?"""
         t0 = time.perf_counter()
-        tracked = self.tracker.update(frame_bgr, detections=[])
+        upper_objs = self.upper_tracker.update(frame_bgr, detections=[])
         t1 = time.perf_counter()
-        uniform_results: dict[int, Any] = {}
-        confirmed = [obj for obj in tracked if obj.is_confirmed]
-        if confirmed:
-            batch = self.uniform.classify_batch(frame_bgr, confirmed)
-            uniform_results = {obj.track_id: res for obj, res in zip(confirmed, batch)}
+        full_objs = []
+        if self.full_interval and (frame_id % self.full_interval == 0 or not upper_objs):
+            full_objs = self.full_tracker.update(frame_bgr, detections=[])
         t2 = time.perf_counter()
+        frame_h, frame_w = frame_bgr.shape[:2]
+        fused = self.fusion.fuse(
+            [(o.track_id, o.xyxy, o.confidence) for o in upper_objs],
+            [(o.track_id, o.xyxy, o.confidence) for o in full_objs],
+            frame_w, frame_h,
+        )
+        t3 = time.perf_counter()
+        uniform_results: dict[str, Any] = {}
+        confirmed = [
+            f for f in fused
+            if f.is_confirmed
+            and (not self.min_box_size or min(f.xyxy[2]-f.xyxy[0], f.xyxy[3]-f.xyxy[1]) >= self.min_box_size)
+        ]
+        if confirmed:
+            batch = self.uniform.classify_batch(
+                frame_bgr, confirmed, rois=[f.upper_roi for f in confirmed]
+            )
+            uniform_results = {f.bt_key: res for f, res in zip(confirmed, batch)}
+        t4 = time.perf_counter()
 
-        persons = self.identity.update(frame_id, frame_bgr, tracked, uniform_results)
+        persons = self.identity.update(frame_id, frame_bgr, fused, uniform_results)
         records: list[dict[str, Any]] = []
         uniform_count = 0
         for p in persons:
@@ -144,13 +180,12 @@ class DetectionPipeline:
             records.append(build_person_record(p))
             if p.uniform:
                 uniform_count += 1
-        t3 = time.perf_counter()
+        t5 = time.perf_counter()
         if self.output_cfg.get("profile", False):
-            self._perf_times["track"].append((t1 - t0) * 1000)
-            self._perf_times["uniform"].append((t2 - t1) * 1000)
-            self._perf_times["identity"].append((t3 - t2) * 1000)
+            self._perf_times["track"].append((t2 - t0) * 1000)
+            self._perf_times["uniform"].append((t4 - t3) * 1000)
+            self._perf_times["identity"].append((t5 - t4) * 1000)
         return records, len(persons), uniform_count
-
     def run(
         self,
         source: str,

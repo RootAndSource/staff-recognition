@@ -8,12 +8,15 @@ video:
   rtsp_timeout_ms: 5000    # RTSP 打开超时（毫秒）
 
 model:
-  weights: "models/yolo11x_finetuned.pt"  # 现场微调版（M2 完成，mAP50=0.965）
+  weights: "models/yolo11x_finetuned.pt"  # 兼容默认（未分类时使用）
+  upper_weights: "models/yolo11x_finetuned.pt"  # 上半身主检（M4 训练后替换）
+  full_weights: "models/yolo11x_finetuned.pt"   # 全身兜底（可降频）
   conf_thres: 0.25         # 检测置信度阈值（11m 下坐姿目标置信度 0.3-0.9，可保持 0.25）
   iou_thres: 0.5           # NMS IoU 阈值
   imgsz: 960               # 推理输入尺寸
   device: ""               # 留空自动选择（cuda 优先）；可写 "cpu" 或 "0"
   min_box_size: 24         # 检测框最小短边（像素），过滤过小噪声
+  full_interval: 3         # 全身兜底检测间隔（帧）；每 N 帧跑一次
 
 tracker:
   name: "botsort"          # BoT-SORT（运动 + ReID 外观融合关联）

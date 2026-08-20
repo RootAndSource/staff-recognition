@@ -150,13 +150,19 @@ class UniformClassifier:
             prob = float(torch.softmax(model(x), dim=1)[0, 1].item())
         return prob
 
-    def classify_batch(self, frame_bgr: cv2.Mat, dets: list[Detection]) -> list[UniformResult]:
+    def classify_batch(self, frame_bgr: cv2.Mat, dets: list[Detection],
+                      rois: list[tuple[int, int, int, int]] | None = None) -> list[UniformResult]:
         """??????????????????????????"""
         frame_bgr = self._preprocess(frame_bgr, self.normalize)
         frame_h, frame_w = frame_bgr.shape[:2]
         # 1) ?? ROI ? HSV ???????cv2 ??
-        roi_main_list = [self._clip_roi(frame_h, frame_w, d.xyxy, self.roi_main) for d in dets]
-        roi_lower_list = [self._clip_roi(frame_h, frame_w, d.xyxy, self.roi_lower) for d in dets]
+        #    rois ???????v0.3 ??????????????????? ROI
+        if rois is not None:
+            roi_main_list = [tuple(int(v) for v in r) for r in rois]
+            roi_lower_list = roi_main_list
+        else:
+            roi_main_list = [self._clip_roi(frame_h, frame_w, d.xyxy, self.roi_main) for d in dets]
+            roi_lower_list = [self._clip_roi(frame_h, frame_w, d.xyxy, self.roi_lower) for d in dets]
         ratios_main = [float(self._red_mask(frame_bgr, r).mean()) for r in roi_main_list]
         ratios_lower = [float(self._red_mask(frame_bgr, r).mean()) for r in roi_lower_list]
         baselines = []

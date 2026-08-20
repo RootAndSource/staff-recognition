@@ -132,7 +132,7 @@ def test_track_restore_reuses_person_id() -> None:
     # 帧 6：重新出现，位置接近（bt_id=2 是 ByteTrack 新 id）→ 恢复 person_id=1
     persons = tr.update(6, _frame(), [_obj(2, [170, 100, 270, 250])], {})
     assert persons[0].person_id == first_id
-    assert persons[0].bt_id == 2
+    assert persons[0].bt_id == "t2"
     assert persons[0].restored is True
 
 
