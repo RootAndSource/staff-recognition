@@ -5,8 +5,14 @@ PyYAML>=6.0
 ultralytics>=8.2.0
 lap>=0.5.12
 
+# GPU 推理：请安装 CUDA 版 torch（ultralytics 默认装 CPU 版）
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
 # 开发/测试
 pytest>=8.0.0
 
 # 进度显示
 tqdm>=4.66.0
+
+# M2 标注工具（labelImg 需固定 PyQt5 版本，见 README）
+#   PyQt5==5.15.9  PyQt5-Qt5==5.15.2  labelImg==1.8.6

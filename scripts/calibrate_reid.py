@@ -116,7 +116,7 @@ def run_calibrate(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ReID 阈值标定")
-    parser.add_argument("--video", default="data/videos/005_part.mp4")
+    parser.add_argument("--video", default="data/preprocessed/005.mp4")
     parser.add_argument("--reid-weights", default="models/yolo26n-cls.pt")
     parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument("--frames", type=int, default=600)

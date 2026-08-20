@@ -56,7 +56,6 @@ class DetectionPipeline:
         )
         self.min_box_size = int(mcfg.get("min_box_size", 0))
         self.tracker = ByteTrackTracker(
-            lost_buffer=tcfg["track_buffer"],
             track_high_thresh=tcfg["track_high_thresh"],
             track_low_thresh=tcfg["track_low_thresh"],
             new_track_thresh=tcfg["new_track_thresh"],
@@ -92,7 +91,6 @@ class DetectionPipeline:
             red_ratio_threshold=ucfg["red_ratio_threshold"],
             normalize=ucfg.get("normalize", True),
         )
-        self.smooth_window = int(ucfg.get("smooth_window", 5))
         self._perf_times: dict[str, list[float]] = {
             "track": [],
             "uniform": [],

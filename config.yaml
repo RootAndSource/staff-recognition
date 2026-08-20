@@ -48,7 +48,6 @@ uniform:
   baseline_factor: 1.5        # ROI 红色占比需 >= 基线 * factor 才算工装
   connected_min_ratio: 0.05   # 最大红色连通域占 ROI 最小比例（工装成块先验）
   normalize: true          # 是否先做直方图均衡化（降低光照影响）
-  smooth_window: 5         # 工装标签时间平滑窗口（帧数），连续多帧稳定后翻转
 
 identity:
   uniform_pending_frames: 10    # 观察期帧数（只积累，不输出标签）
@@ -81,4 +80,4 @@ batch:
 evaluate:
   sample_every_n_frames: 30   # evaluate.py 抽帧间隔
   sample_count: 100           # 人工抽查帧数（验收口径 100 帧）
-  annotation_csv: "outputs/run/annotations.csv"
+  annotation_csv: "outputs/evaluate/annotations.csv"

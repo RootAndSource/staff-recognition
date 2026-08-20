@@ -47,7 +47,7 @@ def run_evaluate(config: dict, video: str | None = None, sample_count: int = 100
             raise FileNotFoundError("未指定 --video，且 data 下没有视频")
         video = str(candidates[0])
 
-    frames_dir = Path("outputs/run/eval_frames")
+    frames_dir = Path("outputs/evaluate/eval_frames")
     paths = sample_frames(
         video,
         sample_every=ev["sample_every_n_frames"],

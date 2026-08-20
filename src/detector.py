@@ -25,7 +25,7 @@ class PersonDetector:
 
     def __init__(
         self,
-        weights: str = "yolo11n.pt",
+        weights: str = "models/yolo11x_finetuned.pt",
         conf_thres: float = 0.35,
         iou_thres: float = 0.5,
         imgsz: int = 640,

@@ -35,7 +35,6 @@ class ByteTrackTracker:
     避免同一帧重复推理（这是实时性 ≥15 FPS 的关键）。
     """
 
-    lost_buffer: int = 30
     track_high_thresh: float = 0.5
     track_low_thresh: float = 0.1
     new_track_thresh: float = 0.6

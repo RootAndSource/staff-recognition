@@ -1,7 +1,7 @@
 """任务 A 员工检测 - 命令行入口。
 
 用法示例：
-    python main.py run path/to/video.mp4 --config config.yaml --json outputs/run/out.jsonl
+    python main.py run path/to/video.mp4 --config config.yaml --json outputs/json/out.jsonl
     python main.py run rtsp://user:pass@host:554/stream --show
     python main.py calibrate path/to/frame.jpg
     python main.py evaluate --frames 100
@@ -24,8 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_p = sub.add_parser("run", help="运行检测管线（视频文件或 RTSP）")
     run_p.add_argument("source", help="本地视频路径或 RTSP URL")
-    run_p.add_argument("--json", help="JSONL 结构化输出路径（如 outputs/run/out.jsonl）")
-    run_p.add_argument("--save-video", help="输出视频路径（如 outputs/run/out.mp4）")
+    run_p.add_argument("--json", help="JSONL 结构化输出路径（如 outputs/json/out.jsonl）")
+    run_p.add_argument("--save-video", help="输出视频路径（如 outputs/mp4/out.mp4）")
     run_p.add_argument("--show", action="store_true", help="显示实时叠加画面")
     run_p.add_argument("--no-show", action="store_true", help="不显示画面（如无显示器环境）")
     run_p.add_argument("--max-frames", type=int, default=0, help="最多处理 N 帧后停止（0=不限制）")
