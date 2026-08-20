@@ -90,6 +90,8 @@ class DetectionPipeline:
             v_min=ucfg["hsv_red"]["v_min"],
             red_ratio_threshold=ucfg["red_ratio_threshold"],
             normalize=ucfg.get("normalize", True),
+            classifier_path=ucfg.get("classifier_path"),
+            classifier_only=bool(ucfg.get("classifier_only", True)),
         )
         self._perf_times: dict[str, list[float]] = {
             "track": [],
@@ -127,10 +129,10 @@ class DetectionPipeline:
         tracked = self.tracker.update(frame_bgr, detections=[])
         t1 = time.perf_counter()
         uniform_results: dict[int, Any] = {}
-        for obj in tracked:
-            if not obj.is_confirmed:
-                continue
-            uniform_results[obj.track_id] = self.uniform.classify(frame_bgr, obj)
+        confirmed = [obj for obj in tracked if obj.is_confirmed]
+        if confirmed:
+            batch = self.uniform.classify_batch(frame_bgr, confirmed)
+            uniform_results = {obj.track_id: res for obj, res in zip(confirmed, batch)}
         t2 = time.perf_counter()
 
         persons = self.identity.update(frame_id, frame_bgr, tracked, uniform_results)

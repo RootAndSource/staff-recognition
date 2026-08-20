@@ -48,6 +48,8 @@ uniform:
   baseline_factor: 1.5        # ROI 红色占比需 >= 基线 * factor 才算工装
   connected_min_ratio: 0.05   # 最大红色连通域占 ROI 最小比例（工装成块先验）
   normalize: true          # 是否先做直方图均衡化（降低光照影响）
+  classifier_path: "models/uniform_cls.pt"  # M3 分类器（启用后工装判定改用分类器概率）
+  classifier_only: true    # true=只用分类器；false=分类器与 HSV 融合（OR）
 
 identity:
   uniform_pending_frames: 10    # 观察期帧数（只积累，不输出标签）
