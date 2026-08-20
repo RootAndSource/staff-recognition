@@ -61,6 +61,7 @@ def prepare_dataset(
 def main() -> None:
     parser = argparse.ArgumentParser(description="M2 检测微调训练")
     parser.add_argument("--data", default="data/finetune")
+    parser.add_argument("--ann-dir", default=None, help="标注目录（默认 data/finetune/annotations_upper）")
     parser.add_argument("--weights", default="models/yolo11x.pt")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch", type=int, default=4)
@@ -72,9 +73,12 @@ def main() -> None:
     args = parser.parse_args()
 
     data_root = Path(args.data)
+    ann_dir = Path(args.ann_dir) if args.ann_dir else data_root / "annotations_upper"
+    if not ann_dir.exists():
+        ann_dir = data_root / "annotations"
     data_yaml = prepare_dataset(
         data_root / "frames",
-        data_root / "annotations",
+        ann_dir,
         data_root / "dataset",
         val_ratio=args.val_ratio,
     )
