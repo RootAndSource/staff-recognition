@@ -9,7 +9,7 @@ video:
 
 model:
   weights: "models/yolo11x_finetuned.pt"  # 兼容默认（未分类时使用）
-  upper_weights: "models/yolo11x_finetuned.pt"  # 上半身主检（M4 训练后替换）
+  upper_weights: "models/yolo11x_upper.pt"  # 上半身主检（M4 训练后替换）
   full_weights: "models/yolo11x_finetuned.pt"   # 全身兜底（可降频）
   conf_thres: 0.25         # 检测置信度阈值（11m 下坐姿目标置信度 0.3-0.9，可保持 0.25）
   iou_thres: 0.5           # NMS IoU 阈值
