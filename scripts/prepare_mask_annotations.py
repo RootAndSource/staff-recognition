@@ -10,8 +10,8 @@
 
 用法示例：
   python scripts/prepare_mask_annotations.py --frames-dir data/finetune/frames \
-      --ann-dir data/finetune/annotations --sam-weights models/sam2.1_s.pt \
-      --out-dir data/finetune/mask_annotations
+      --ann-dir data/finetune/annotations --sam-weights models/sam2.1_l.pt \
+      --out-dir data/finetune/mask_annotations_saml
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def main() -> None:
         help="已有 YOLO 框标注目录（推荐）；不提供则用检测器出框",
     )
     parser.add_argument("--det-weights", default="models/yolo11x_finetuned.pt")
-    parser.add_argument("--sam-weights", default="models/sam2.1_s.pt")
+    parser.add_argument("--sam-weights", default="models/sam2.1_l.pt")
     parser.add_argument("--out-dir", default="data/finetune/mask_annotations")
     parser.add_argument("--conf", type=float, default=0.25)
     parser.add_argument("--imgsz", type=int, default=960)
