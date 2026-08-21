@@ -39,6 +39,8 @@ class PersonObject:
     red_ratio_connected: float = 0.0   # 最大红色连通域占比（判定依据）
     mask: np.ndarray | None = None            # HxW bool 实例掩码（分割模式）
     polygon_norm: np.ndarray | None = None    # 归一化多边形（JSONL 输出）
+    parts: list = field(default_factory=list)      # v0.6: 实例部件列表（分裂归并后）
+    split_relation: bool = False                   # v0.6: 本帧是否为分裂归并产物
     baseline_ratio: float = 0.0        # 场景红色基线（判定依据）
 
 

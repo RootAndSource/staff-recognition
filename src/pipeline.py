@@ -17,6 +17,7 @@ from .detector import PersonDetector
 from .fusion import DetectionFusion
 from .segmentor import load_segmentation_engine
 from .identity import IdentityTracker
+from .instance_merge import InstanceMerger
 from .output import JsonOutputWriter, build_person_record
 from .tracker import ByteTrackTracker
 from .uniform import UniformClassifier, _RoiSpec
@@ -152,6 +153,13 @@ class DetectionPipeline:
         self.fusion = DetectionFusion()
         if self.seg_mode:
             self.segmentor = load_segmentation_engine(self.config, det_model=self.seg_detector)
+            try:
+                from ultralytics.trackers.utils.reid import build_encoder
+                self.merger = InstanceMerger(
+                    build_encoder(True, seg_w, None)
+                )
+            except Exception:
+                self.merger = InstanceMerger(None)
         self.upper_detector.load()
         self.full_detector.load()
 
@@ -224,6 +232,8 @@ class DetectionPipeline:
         t4 = time.perf_counter()
 
         persons = self.identity.update(frame_id, frame_bgr, fused, uniform_results)
+        if self.seg_mode and self.merger is not None:
+            persons = self.merger.process(frame_bgr, persons, frame_id)
         records: list[dict[str, Any]] = []
         uniform_count = 0
         for p in persons:

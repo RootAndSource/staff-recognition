@@ -70,6 +70,8 @@ def build_person_record(
         "red_ratio_connected": round(person.red_ratio_connected, 4),
         "baseline_ratio": round(person.baseline_ratio, 4),
         "confidence": round(person.confidence, 4),
+        "parts": person.parts if person.parts else None,
+        "split_relation": bool(person.split_relation),
         "mask_polygon": (
             [[round(float(x), 6), round(float(y), 6)] for x, y in person.polygon_norm]
             if person.polygon_norm is not None
