@@ -2,13 +2,12 @@
 
 数据约定：
   data/finetune/frames/            帧图（jpg）
-  data/finetune/mask_annotations/labelme/     labelme 多边形 JSON（人工修正后）
-  data/finetune/mask_annotations/yolo_seg/     YOLO-seg 预标 txt（SAM 自动生成）
+  data/finetune/mask_annotations_manual/labelme/  labelme 多边形 JSON（人工标注）
 
-运行前先用 labelme 修正 SAM 预标（或直接使用 yolo_seg 预标做初版）。
+运行前先用 labelme 完成全部 375 帧掩码标注。
 
 用法示例：
-  python scripts/train_segmentor.py --ann-dir data/finetune/mask_annotations/labelme \
+  python scripts/train_segmentor.py --ann-dir data/finetune/mask_annotations_manual/labelme \
       --weights models/yolo11x-seg.pt --epochs 50 --batch 4
 """
 
@@ -92,7 +91,7 @@ def main() -> None:
     parser.add_argument("--data", default="data/finetune")
     parser.add_argument(
         "--ann-dir",
-        default="data/finetune/mask_annotations/labelme",
+        default="data/finetune/mask_annotations_manual/labelme",
         help="掩码标注目录（labelme JSON 或 YOLO-seg txt）",
     )
     parser.add_argument("--weights", default="models/yolo11x-seg.pt")
