@@ -18,31 +18,26 @@ import argparse
 import json
 from pathlib import Path
 
-import cv2
 import numpy as np
 from ultralytics import YOLO
 
 
-def _mask_to_polygon(mask: np.ndarray, img_w: int, img_h: int, max_points: int = 40) -> list[np.ndarray]:
-    """把二值掩码转成轮廓多边形（简化顶点数）。mask 尺寸为 HxW。"""
-    mask_u8 = (mask * 255).astype(np.uint8)
-    contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    polys = []
-    for cnt in contours:
-        if len(cnt) < 3:
-            continue
-        cnt = cnt.reshape(-1, 2).astype(float)
-        # 简化
-        closed = np.vstack([cnt, cnt[0]]).astype(np.float32)
-        eps = 0.01 * cv2.arcLength(closed, True)
-        while True:
-            approx = cv2.approxPolyDP(closed, eps, True).reshape(-1, 2)
-            if len(approx) <= max_points or eps <= 1e-6:
-                break
-            eps *= 0.6
-        if len(approx) >= 3:
-            polys.append(approx)
-    return polys
+def _simplify_polygon(poly: np.ndarray, max_points: int = 40) -> np.ndarray:
+    """简化多边形顶点数（Douglas-Peucker），poly 为原图像素坐标 Nx2。"""
+    if len(poly) <= max_points:
+        return poly
+    import cv2
+
+    closed = np.asarray(poly, dtype=np.float32)
+    if not np.allclose(closed[0], closed[-1]):
+        closed = np.vstack([closed, closed[0]])
+    eps = 0.01 * cv2.arcLength(closed, True)
+    while True:
+        approx = cv2.approxPolyDP(closed, eps, True).reshape(-1, 2)
+        if len(approx) <= max_points or eps <= 1e-6:
+            break
+        eps *= 0.6
+    return approx
 
 
 def _write_labelme_json(
@@ -124,13 +119,16 @@ def main() -> None:
         polys_norm: list[np.ndarray] = []
         if res.masks is not None and res.boxes is not None:
             cls = res.boxes.cls.cpu().numpy()
-            masks = res.masks.data.cpu().numpy()
-            for c, mask in zip(cls, masks):
+            area_ratios = np.asarray(res.boxes.xywh.cpu().numpy())[:, 2] * np.asarray(
+                res.boxes.xywh.cpu().numpy()
+            )[:, 3] / (w * h)
+            for c, poly_xy, area_ratio in zip(cls, res.masks.xy, area_ratios):
                 if int(c) != 0:  # 只保留 person
                     continue
-                if mask.mean() < args.min_area_ratio:
+                if area_ratio < args.min_area_ratio:
                     continue
-                for poly in _mask_to_polygon(mask, w, h):
+                poly = _simplify_polygon(np.asarray(poly_xy, dtype=float))
+                if len(poly) >= 3:
                     polys_px.append(poly)
                     polys_norm.append(poly / np.array([w, h], dtype=float))
 
