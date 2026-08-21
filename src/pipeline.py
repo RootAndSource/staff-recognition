@@ -180,14 +180,13 @@ class DetectionPipeline:
           )
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
         self.fusion = DetectionFusion()
+        self.merger = None
         if self.seg_mode:
             self.segmentor = load_segmentation_engine(self.config, det_model=self.seg_detector)
-            try:
-                from ultralytics.trackers.utils.reid import build_encoder
-                self.merger = InstanceMerger(
-                    build_encoder(True, seg_w, None)
-                )
-            except Exception:
+            # Appearance ReID merging is disabled (Phase 0 calibration: both the
+            # detector embedding and OSNet overlap between same/different person),
+            # awaiting the v0.7 design before re-enabling.
+            if bool(scfg.get("merge_enabled", False)):
                 self.merger = InstanceMerger(None)
         self.upper_detector.load()
         self.full_detector.load()

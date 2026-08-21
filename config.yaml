@@ -20,6 +20,7 @@ model:
 
 segmentation:
   enabled: true              # 分割模式：检测器 + SAM2 人体实例掩码（M5 路线）
+  merge_enabled: false       # Instance appearance merging disabled (Phase 0 evidence); awaiting v0.7 design
   det_weights: "models/yolo11x_finetuned.pt"  # 全身检测出框
   sam_weights: "models/sam2.1_l.pt"          # 分割掩码（最强现成模型）
   conf_thres: 0.25
