@@ -143,6 +143,11 @@ def main() -> None:
             continue
         h, w = frame.shape[:2]
 
+        # 复制图片到 labelme 目录（labelme 只扫描同目录图片）
+        img_dst = labelme_dir / img_path.name
+        if not img_dst.exists():
+            img_dst.write_bytes(img_path.read_bytes())
+
         if ann_dir is not None:
             ann_txt = ann_dir / f"{img_path.stem}.txt"
             if not ann_txt.exists():
