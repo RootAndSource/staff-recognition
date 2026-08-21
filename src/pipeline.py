@@ -15,6 +15,7 @@ from tqdm import tqdm
 from .config import load_config
 from .detector import PersonDetector
 from .fusion import DetectionFusion
+from .segmentor import load_segmentation_engine
 from .identity import IdentityTracker
 from .output import JsonOutputWriter, build_person_record
 from .tracker import ByteTrackTracker
@@ -48,25 +49,40 @@ class DetectionPipeline:
         )
         self.video_cfg = vcfg
         self.output_cfg = ocfg
+        scfg = self.config.get("segmentation", {})
+        self.seg_mode = bool(scfg.get("enabled", False))
+        self.segmentor = None
         self.min_box_size = int(mcfg.get("min_box_size", 0))
         self.full_interval = int(mcfg.get("full_interval", 3))
         upper_w = mcfg.get("upper_weights") or mcfg["weights"]
         full_w = mcfg.get("full_weights") or mcfg["weights"]
-        self.upper_detector = PersonDetector(
-            weights=upper_w,
-            conf_thres=mcfg["conf_thres"],
-            iou_thres=mcfg["iou_thres"],
-            imgsz=mcfg["imgsz"],
-            device=mcfg.get("device", ""),
-        )
-        self.full_detector = PersonDetector(
-            weights=full_w,
-            conf_thres=mcfg["conf_thres"],
-            iou_thres=mcfg["iou_thres"],
-            imgsz=mcfg["imgsz"],
-            device=mcfg.get("device", ""),
-        )
-        self.detector = self.upper_detector  # ?????
+        if self.seg_mode:
+            seg_w = scfg.get("det_weights") or full_w
+            self.seg_detector = PersonDetector(
+                weights=seg_w,
+                conf_thres=mcfg["conf_thres"],
+                iou_thres=mcfg["iou_thres"],
+                imgsz=mcfg["imgsz"],
+                device=mcfg.get("device", ""),
+            )
+            self.upper_detector = self.seg_detector
+            self.full_detector = self.seg_detector
+        else:
+            self.upper_detector = PersonDetector(
+                weights=upper_w,
+                conf_thres=mcfg["conf_thres"],
+                iou_thres=mcfg["iou_thres"],
+                imgsz=mcfg["imgsz"],
+                device=mcfg.get("device", ""),
+            )
+            self.full_detector = PersonDetector(
+                weights=full_w,
+                conf_thres=mcfg["conf_thres"],
+                iou_thres=mcfg["iou_thres"],
+                imgsz=mcfg["imgsz"],
+                device=mcfg.get("device", ""),
+            )
+        self.detector = self.upper_detector
 
         def _make_tracker(det):
             return ByteTrackTracker(
@@ -134,8 +150,39 @@ class DetectionPipeline:
           )
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
         self.fusion = DetectionFusion()
+        if self.seg_mode:
+            self.segmentor = load_segmentation_engine(self.config, det_model=self.seg_detector)
         self.upper_detector.load()
         self.full_detector.load()
+
+    def _segment_frame(self, frame_bgr: cv2.Mat) -> list[Any]:
+        """分割模式：ByteTrack 跟踪派生框 + SAM2 掩码 -> FusedDetection 列表。"""
+        tracked = self.upper_tracker.update(frame_bgr, detections=[])
+        if not tracked:
+            return []
+        boxes = np.array([o.xyxy for o in tracked], dtype=float)
+        confs = np.array([o.confidence for o in tracked], dtype=float)
+        insts = self.segmentor.segment_with_boxes(frame_bgr, boxes, confs)
+        from .fusion import FusedDetection
+        fused = []
+        for o, inst in zip(tracked, insts):
+            if inst is None:
+                continue
+            x1, y1, x2, y2 = [int(v) for v in inst.xyxy]
+            roi = (x1, y1, x2, y1 + int(0.55 * (y2 - y1)))
+            fused.append(
+                FusedDetection(
+                    xyxy=inst.xyxy,
+                    confidence=inst.confidence,
+                    box_type="mask",
+                    upper_roi=roi,
+                    bt_key=f"s{o.track_id}",
+                    is_confirmed=o.is_confirmed,
+                    mask=inst.mask,
+                    polygon_norm=inst.polygon_norm,
+                )
+            )
+        return fused
 
     def _process_frame(
         self,
@@ -145,19 +192,24 @@ class DetectionPipeline:
     ) -> tuple[list[dict[str, Any]], int, int]:
         """??????? (json_records, ??, ????)?"""
         t0 = time.perf_counter()
-        upper_objs = self.upper_tracker.update(frame_bgr, detections=[])
-        t1 = time.perf_counter()
-        full_objs = []
-        if self.full_interval and (frame_id % self.full_interval == 0 or not upper_objs):
-            full_objs = self.full_tracker.update(frame_bgr, detections=[])
-        t2 = time.perf_counter()
-        frame_h, frame_w = frame_bgr.shape[:2]
-        fused = self.fusion.fuse(
-            [(o.track_id, o.xyxy, o.confidence) for o in upper_objs],
-            [(o.track_id, o.xyxy, o.confidence) for o in full_objs],
-            frame_w, frame_h,
-        )
-        t3 = time.perf_counter()
+        if self.seg_mode:
+            fused = self._segment_frame(frame_bgr)
+            frame_h, frame_w = frame_bgr.shape[:2]
+            t1 = t2 = t3 = time.perf_counter()
+        else:
+            upper_objs = self.upper_tracker.update(frame_bgr, detections=[])
+            t1 = time.perf_counter()
+            full_objs = []
+            if self.full_interval and (frame_id % self.full_interval == 0 or not upper_objs):
+                full_objs = self.full_tracker.update(frame_bgr, detections=[])
+            t2 = time.perf_counter()
+            frame_h, frame_w = frame_bgr.shape[:2]
+            fused = self.fusion.fuse(
+                [(o.track_id, o.xyxy, o.confidence) for o in upper_objs],
+                [(o.track_id, o.xyxy, o.confidence) for o in full_objs],
+                frame_w, frame_h,
+            )
+            t3 = time.perf_counter()
         uniform_results: dict[str, Any] = {}
         confirmed = [
             f for f in fused

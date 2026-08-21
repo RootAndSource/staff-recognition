@@ -22,6 +22,8 @@ class FusedDetection:
     upper_roi: tuple[int, int, int, int]  # 推导的上半身 ROI（像素）
     bt_key: str = ""                # ?????? u3/f7???????
     is_confirmed: bool = True
+    mask: np.ndarray | None = None       # HxW bool instance mask (seg mode)
+    polygon_norm: np.ndarray | None = None  # normalized polygon for JSONL
 
 
 def _iou(a: np.ndarray, b: np.ndarray) -> float:

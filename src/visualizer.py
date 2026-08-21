@@ -65,6 +65,17 @@ def draw_tracked(frame_bgr, person: PersonObject) -> None:
     else:
         color = COLOR_UNIFORM if person.uniform else COLOR_NO_UNIFORM
         label = f"{person.confidence:.2f} {'工装' if person.uniform else '未工装'}"
+    mask = getattr(person, "mask", None)
+    if mask is not None:
+        mask_u8 = (mask > 0.5).astype(np.uint8) * 255
+        overlay = frame_bgr.copy()
+        colored = np.zeros_like(frame_bgr)
+        colored[:, :, 1] = 120
+        sel = mask_u8 > 0
+        overlay[sel] = cv2.addWeighted(overlay[sel], 0.55, colored[sel], 0.45, 0)
+        contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(overlay, contours, -1, color, 2)
+        frame_bgr[:] = overlay
     cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), color, 2)
     bar_h = 24
     bar_w = 18 * len(label) + 12

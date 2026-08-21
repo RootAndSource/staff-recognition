@@ -18,6 +18,16 @@ model:
   min_box_size: 24         # 检测框最小短边（像素），过滤过小噪声
   full_interval: 3         # 全身兜底检测间隔（帧）；每 N 帧跑一次
 
+segmentation:
+  enabled: true              # 分割模式：检测器 + SAM2 人体实例掩码（M5 路线）
+  det_weights: "models/yolo11x_finetuned.pt"  # 全身检测出框
+  sam_weights: "models/sam2.1_l.pt"          # 分割掩码（最强现成模型）
+  conf_thres: 0.25
+  imgsz: 960
+  max_det: 40
+  min_mask_area_ratio: 0.0001   # 过滤极小掩码（相对整图面积）
+  simplify_points: 40           # 输出多边形顶点数上限
+  device: ""
 tracker:
   name: "botsort"          # BoT-SORT（运动 + ReID 外观融合关联）
   track_buffer: 150        # 轨迹丢失缓冲帧数（5 秒 @30fps）

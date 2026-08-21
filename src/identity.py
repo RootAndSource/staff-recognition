@@ -37,6 +37,8 @@ class PersonObject:
     restored: bool = False          # 本帧是否从暂存恢复
     restored_from: int | None = None  # 恢复来源 person_id
     red_ratio_connected: float = 0.0   # 最大红色连通域占比（判定依据）
+    mask: np.ndarray | None = None            # HxW bool 实例掩码（分割模式）
+    polygon_norm: np.ndarray | None = None    # 归一化多边形（JSONL 输出）
     baseline_ratio: float = 0.0        # 场景红色基线（判定依据）
 
 
@@ -434,6 +436,8 @@ class IdentityTracker:
                     restored_from=person_id if restored else None,
                     red_ratio_connected=raw.red_ratio_connected if raw is not None else 0.0,
                     baseline_ratio=raw.baseline_ratio if raw is not None else 0.0,
+                mask=getattr(obj, "mask", None),
+                polygon_norm=getattr(obj, "polygon_norm", None),
                 )
             )
 
