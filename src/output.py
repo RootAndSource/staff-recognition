@@ -57,7 +57,7 @@ class JsonOutputWriter:
 def build_person_record(
     person: PersonObject,
 ) -> dict[str, Any]:
-    """把稳定人员对象组装成 JSON 记录。"""
+    """把稳定人员对象组装成 JSON 记录（坐标为处理帧像素/归一化，由外层还原到原图）。"""
     return {
         "person_id": person.person_id,
         "bt_id": person.bt_id,

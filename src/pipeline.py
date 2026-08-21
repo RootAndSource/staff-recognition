@@ -35,6 +35,35 @@ class PipelineStats:
     frames_fps_window: list[float] = field(default_factory=list)
 
 
+def _scale_records(records: list[dict], scale: float, raw_w: int, raw_h: int) -> list[dict]:
+    """把记录坐标还原到原图：bbox 乘 scale（等比缩放），mask_polygon 乘原图宽高（归一化）。"""
+    out = []
+    for rec in records:
+        r = dict(rec)
+        if "bbox" in r and r["bbox"]:
+            r["bbox"] = [float(v) * scale for v in r["bbox"]]
+        if "mask_polygon" in r and r["mask_polygon"]:
+            r["mask_polygon"] = [
+                [float(x) * raw_w, float(y) * raw_h]
+                for x, y in r["mask_polygon"]
+            ]
+        if "parts" in r and r["parts"]:
+            parts = []
+            for part in r["parts"]:
+                pp = dict(part)
+                if part.get("bbox"):
+                    pp["bbox"] = [float(v) * scale for v in part["bbox"]]
+                if part.get("mask_polygon"):
+                    pp["mask_polygon"] = [
+                        [float(x) * raw_w, float(y) * raw_h]
+                        for x, y in part["mask_polygon"]
+                    ]
+                parts.append(pp)
+            r["parts"] = parts
+        out.append(r)
+    return out
+
+
 class DetectionPipeline:
     """任务 A 主管线。"""
 
@@ -303,10 +332,15 @@ class DetectionPipeline:
                     stats.uniform_count += uniform_count
 
                     if json_writer and stats.frames_processed % self.output_cfg["json_every_n_frames"] == 0:
+                        scale = 1.0
+                        raw_w = info.width or frame.shape[1]
+                        raw_h = info.height or frame.shape[0]
+                        if frame.shape[1] and frame.shape[0]:
+                            scale = max(raw_w / frame.shape[1], raw_h / frame.shape[0])
                         json_writer.write_frame(
                             frame_id=info.frame_id,
                             timestamp_ms=info.timestamp_ms,
-                            records=records,
+                            records=_scale_records(records, scale, raw_w, raw_h),
                         )
 
                     if video_writer is not None:
