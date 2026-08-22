@@ -114,6 +114,51 @@ class SegmentationEngine:
             )
         return results
 
+    def segment_parts(
+        self,
+        frame_bgr: cv2.Mat,
+        instances: list[SegmentInstance],
+        upper_ratio: float = 0.55,
+    ) -> list[np.ndarray | None]:
+        """M7 部位分割：在实例掩码内切上半身部位。
+
+        用"上半身框"（实例框顶部到 upper_ratio 高度）提示 SAM2 出上半身掩码，
+        再与实例掩码取交集，得到工装 ROI 使用的部位掩码（排除桌子/背景）。
+        当前只实现 upper_body；head/face/torso/legs 为 B/C/D 预留。
+        """
+        if not instances:
+            return []
+        boxes = []
+        valid_idx = []
+        for i, inst in enumerate(instances):
+            x1, y1, x2, y2 = [float(v) for v in inst.xyxy]
+            if x2 - x1 < 2 or y2 - y1 < 2:
+                continue
+            ub = [x1, y1, x2, y1 + upper_ratio * (y2 - y1)]
+            boxes.append(ub)
+            valid_idx.append(i)
+        if not boxes:
+            return [None] * len(instances)
+        try:
+            sam_res = self.sam(
+                frame_bgr, bboxes=np.asarray(boxes, dtype=float),
+                verbose=False, device=self.device,
+            )[0]
+        except Exception:
+            return [None] * len(instances)
+        parts: list[np.ndarray | None] = [None] * len(instances)
+        if sam_res.masks is None or len(sam_res.masks) == 0:
+            return parts
+        masks = sam_res.masks.data.cpu().numpy()
+        for mask, idx in zip(masks, valid_idx):
+            upper = mask > 0.5
+            inst = instances[idx]
+            if inst.mask is None:
+                parts[idx] = upper
+            else:
+                parts[idx] = upper & inst.mask
+        return parts
+
     def segment(self, frame_bgr: cv2.Mat) -> list[SegmentInstance]:
         """对一帧执行实例分割，返回人体实例列表（按置信度降序）。"""
         h, w = frame_bgr.shape[:2]
