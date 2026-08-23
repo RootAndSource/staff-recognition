@@ -48,7 +48,8 @@ outputs/
 docs/
 
 # 运行时生成的跟踪器配置
-configs/
+configs/*
+!configs/s1246.yaml
 
 # 训练产物
 runs/
