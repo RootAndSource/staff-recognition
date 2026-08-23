@@ -34,6 +34,8 @@ class PersonObject:
     uniform: bool | None            # 工装标签（pending 阶段为 None）
     uniform_state: str              # "pending" / "active" / "confirmed"
     uniform_prob: float             # 当前工装概率（0-1）
+    uniform_raw: bool | None = None   # 当前帧掩码检测结果（S4 原始）
+    uniform_memory: bool | None = None  # 记忆判断结果（长期记忆）
     restored: bool = False          # 本帧是否从暂存恢复
     restored_from: int | None = None  # 恢复来源 person_id
     red_ratio_connected: float = 0.0   # 最大红色连通域占比（判定依据）
@@ -60,6 +62,9 @@ class _StoredTrack:
     uniform_history: list[bool] = field(default_factory=list)
     reverse_streak: int = 0
     confirmed_frames: int = 0
+    uniform_memory: bool | None = None
+    memory_confidence: float = 0.0
+    state_duration: int = 0
 
 
 @dataclass
@@ -85,6 +90,9 @@ class _PersonState:
     reverse_streak: int = 0
     confirmed_frames: int = 0
     total_frames: int = 0
+    uniform_memory: bool | None = None
+    memory_confidence: float = 0.0
+    state_duration: int = 0
     last_center: np.ndarray | None = None
     last_box: np.ndarray | None = None
     last_velocity: np.ndarray | None = None
@@ -126,6 +134,13 @@ class IdentityTracker:
         uniform_confirm_frames: int = 60,
         uniform_confirm_high: float = 0.9,
         reverse_streak_frames: int = 5,
+        uniform_reverse_base: int = 3,
+        uniform_reverse_true_base: int = 60,
+        uniform_reverse_growth: float = 0.05,
+        uniform_reverse_max: int = 240,
+        memory_gain: float = 0.04,
+        memory_decay: float = 0.02,
+        memory_hold_threshold: float = 0.6,
         track_ttl_frames: int = 300,       # 画面内消失暂存 10 秒 @30fps
         boundary_ttl_frames: int = 60,     # 边界附近消失暂存 2 秒
         match_distance_factor: float = 2.5,   # 位置匹配距离 = 框宽 * factor
@@ -138,6 +153,13 @@ class IdentityTracker:
         self.uniform_confirm_frames = uniform_confirm_frames
         self.uniform_confirm_high = uniform_confirm_high
         self.reverse_streak_frames = reverse_streak_frames
+        self.uniform_reverse_base = uniform_reverse_base
+        self.uniform_reverse_true_base = uniform_reverse_true_base
+        self.uniform_reverse_growth = uniform_reverse_growth
+        self.uniform_reverse_max = uniform_reverse_max
+        self.memory_gain = memory_gain
+        self.memory_decay = memory_decay
+        self.memory_hold_threshold = memory_hold_threshold
         self.track_ttl_frames = track_ttl_frames
         self.boundary_ttl_frames = boundary_ttl_frames
         self.match_distance_factor = match_distance_factor
@@ -191,53 +213,93 @@ class IdentityTracker:
 
     # ---------- 工装延迟态 ----------
 
+    def _dynamic_reverse_required(self, state: _PersonState) -> int:
+        """动态翻转需求：状态持续越久，反向证据需求越多。"""
+        base = (
+            self.uniform_reverse_true_base
+            if state.uniform
+            else self.uniform_reverse_base
+        )
+        return min(
+            base + int(state.state_duration * self.uniform_reverse_growth),
+            self.uniform_reverse_max,
+        )
+
     def _update_uniform(
         self,
         state: _PersonState,
         raw_uniform: bool,
         raw_result: UniformResult,
     ) -> None:
-        """延迟态状态机：PENDING → ACTIVE → CONFIRMED，翻转需要连续反向证据。"""
+        """工装记忆 + 动态翻转难度状态机。
+
+        内核设计：
+        - 冷启动直接出标签（无 pending），随后逐渐增强记忆；
+        - 记忆带在 person 上（消失恢复后仍保留）；
+        - 翻转难度随状态持续时长动态增加；
+        - 串→未串 几乎不翻（排除换装）但不锁死；未串→串 相对容易。
+        """
         state.total_frames += 1
-        if state.total_frames < self.uniform_pending_frames:
-            state.uniform_state = UNIFORM_PENDING
-            state.uniform = None
-            state.uniform_prob = 0.5
+
+        # 冷启动：第一帧直接出标签，记忆从低置信开始
+        if state.uniform is None:
+            state.uniform = raw_uniform
+            state.uniform_memory = raw_uniform
+            state.memory_confidence = 0.3
+            state.state_duration = 1
+            state.reverse_streak = 0
+            state.uniform_prob = 1.0 if raw_uniform else 0.0
+            state.uniform_state = UNIFORM_ACTIVE
             return
 
+        # 当前标签持续 / 反向积累
+        if raw_uniform == state.uniform:
+            state.state_duration += 1
+            state.reverse_streak = 0
+        else:
+            # 动态反向需求：状态持续越久翻转越难
+            base = (
+                self.uniform_reverse_true_base
+                if state.uniform
+                else self.uniform_reverse_base
+            )
+            required = self._dynamic_reverse_required(state)
+            state.reverse_streak += 1
+            if state.reverse_streak >= required:
+                # 翻转（极稀有）：标签与记忆同时更新，重新积累
+                state.uniform = raw_uniform
+                state.uniform_memory = raw_uniform
+                state.memory_confidence = 0.4
+                state.state_duration = 1
+                state.reverse_streak = 0
+
+        # 记忆置信度：与长期记忆一致增强，否则衰减
+        if raw_uniform == state.uniform_memory:
+            state.memory_confidence = min(1.0, state.memory_confidence + self.memory_gain)
+        else:
+            state.memory_confidence = max(0.1, state.memory_confidence - self.memory_decay)
+
+        # 记忆压制抖动：置信度达标且反向证据不足时，输出回到记忆
+        if (
+            state.uniform_memory is not None
+            and state.memory_confidence >= self.memory_hold_threshold
+            and state.uniform != state.uniform_memory
+            and state.reverse_streak < self._dynamic_reverse_required(state)
+        ):
+            state.uniform = state.uniform_memory
+            state.state_duration += 1
+
+        # 历史窗口 & 概率（用于 confirmed 与 JSON）
         state.uniform_history.append(raw_uniform)
         if len(state.uniform_history) > self.uniform_window:
             state.uniform_history.pop(0)
-        prob = sum(state.uniform_history) / len(state.uniform_history)
-        state.uniform_prob = prob
+        state.uniform_prob = sum(state.uniform_history) / max(len(state.uniform_history), 1)
 
-        if state.uniform is None:
-            state.uniform = raw_uniform
-            state.uniform_state = UNIFORM_ACTIVE
-            state.reverse_streak = 0
-            state.confirmed_frames = 0
-            return
-
-        if raw_uniform != state.uniform:
-            state.reverse_streak += 1
-            if state.reverse_streak >= self.reverse_streak_frames:
-                state.uniform = raw_uniform
-                state.reverse_streak = 0
-                state.confirmed_frames = 0
-        else:
-            state.reverse_streak = 0
-            if state.uniform is not None:
-                state.uniform_history = [
-                    u for u in state.uniform_history if u == state.uniform
-                ] or [state.uniform]
-
-        if state.uniform_state != UNIFORM_CONFIRMED:
-            state.uniform_state = UNIFORM_ACTIVE
-
-        if state.uniform is not None:
+        # 确认状态：串工装可 confirmed；未串保持 active（不锁定）
+        if state.uniform is True:
             consistent = (
                 state.reverse_streak == 0
-                and sum(state.uniform_history) >= self.uniform_confirm_high * len(state.uniform_history)
+                and state.uniform_prob >= self.uniform_confirm_high
             )
             if consistent:
                 state.confirmed_frames += 1
@@ -247,6 +309,9 @@ class IdentityTracker:
                 state.confirmed_frames = 0
                 if state.uniform_state == UNIFORM_CONFIRMED:
                     state.uniform_state = UNIFORM_ACTIVE
+        else:
+            state.confirmed_frames = 0
+            state.uniform_state = UNIFORM_ACTIVE
 
     # ---------- 暂存与恢复 ----------
 
@@ -305,6 +370,9 @@ class IdentityTracker:
             reverse_streak=st.reverse_streak,
             confirmed_frames=st.confirmed_frames,
             total_frames=len(st.uniform_history),
+            uniform_memory=st.uniform_memory,
+            memory_confidence=st.memory_confidence,
+            state_duration=st.state_duration,
         )
         self._persons[best_id] = state
         self.stats["restored"] += 1
@@ -344,6 +412,9 @@ class IdentityTracker:
             uniform_history=list(state.uniform_history),
             reverse_streak=state.reverse_streak,
             confirmed_frames=state.confirmed_frames,
+            uniform_memory=state.uniform_memory,
+            memory_confidence=state.memory_confidence,
+            state_duration=state.state_duration,
         )
 
     def _prune_stored(self, frame_id: int, frame_w: int, frame_h: int) -> None:
@@ -422,7 +493,7 @@ class IdentityTracker:
             raw = uniform_results.get(bt_id)
             if raw is None:
                 raw = uniform_results.get(getattr(obj, "track_id", None))
-            if raw is not None:
+            if raw is not None and getattr(raw, "valid", True):
                 self._update_uniform(state, raw.is_uniform, raw)
 
             objects.append(
@@ -432,6 +503,8 @@ class IdentityTracker:
                     xyxy=box,
                     confidence=obj.confidence,
                     uniform=state.uniform,
+                    uniform_raw=raw.is_uniform if raw is not None else None,
+                    uniform_memory=state.uniform_memory,
                     uniform_state=state.uniform_state,
                     uniform_prob=state.uniform_prob,
                     restored=restored,
