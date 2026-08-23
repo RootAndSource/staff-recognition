@@ -1,35 +1,53 @@
 # 任务 A：员工检测（人员检测 + 工装识别）
 
-单摄像头（固定机位，斜俯视）检测会议/教室场景中的所有人员，识别是否穿红色工装
-（背心/短袖），为每个人员维护跨帧持续 ID，供任务 B/C/D 按人统计使用。
+对固定机位、斜俯视角的教室/会议室本地视频做离线批处理：检测画面中所有人员，识别是否穿红色工装（背心/短袖），为每个人维护跨帧稳定的 person ID，供任务 B/C/D 按人统计使用。
 
-## 当前技术栈
+## 主链路（S1-S7，已定稿 v0.6）
 
-| 环节 | 方案 |
-| --- | --- |
-| 人员检测 | YOLO11x 现场微调版（`models/yolo11x_finetuned.pt`，mAP50=0.965） |
-| 多目标跟踪 | BoT-SORT（运动 + ReID 外观融合，`reid_model: auto` 用检测器特征） |
-| ID 管理 | IdentityTracker：画面内消失 10 秒暂存恢复、边界离开释放、新 ID 3 帧确认 |
-| 工装判定 | HSV 规则（当前过渡）+ MobileNetV3-Small 分类器（`models/uniform_cls.pt`，已训练待接入） |
-| 工装状态 | 延迟态状态机（pending/active/confirmed，翻转需连续反向证据） |
-| 输出 | JSONL（person_id/bbox/uniform/state/置信度）+ 叠加视频 |
+```
+视频文件（离线批处理）
+│
+└── S1 全身检测：YOLO26x 出全身框
+    │
+    ├── S2 实例分割：SAM2.1 对框内出可见块掩码 1~N 块
+    │   │
+    │   ├── S3 上半身切割：弃用
+    │   │
+    │   ├── S4 工装识别：掩码内工装色规则（免训练）
+    │   │
+    │   └── S6 身份与状态：person_id + 工装记忆（动态翻转难度）
+    │       └── S7 输出：JSONL + 叠加视频
+    │
+    └── S5 跟踪（并行支线）：YOLO26 + ByteTrack → track_id → 汇入 S6
+```
+
+## 技术栈
+
+| 环节 | 方案 | 状态 |
+| --- | --- | --- |
+| 人员检测（S1） | YOLO26x（COCO 预训练，不微调） | ✅ 定案 |
+| 实例分割（S2） | SAM2.1 large box-prompt | ✅ 定案 |
+| 工装识别（S4） | 掩码内工装色规则（红色占比 + 连通块） | ✅ 定案（免训练） |
+| 跟踪（S5） | ByteTrack（track_buffer=150 等调参） | ✅ 定案 |
+| 身份与状态（S6） | IdentityTracker + 工装记忆层 | ✅ 定案（长记忆） |
+| 输出（S7） | JSONL + 叠加视频 | ✅ 定案 |
 
 ## 目录结构
 
 ```
-src/            核心代码（检测/跟踪/ID/工装/输出）
-scripts/        数据准备与训练脚本（M2/M3）
+src/            核心代码（检测/跟踪/身份/工装/输出）
+scripts/        工具脚本（S1/S2/S5 组合、训练、评估、对比）
 tests/          单元测试
-config.yaml     全部可标定参数
+config.yaml     默认全链路配置
+configs/        运行配置（s1246.yaml、s1246_memlong.yaml）
 data/
-  preprocessed/   批量输入视频（001.mp4 ...）
-  finetune/       检测微调数据（frames + annotations）
-  uniform_crops/  工装分类数据（sample/positive|negative）
-models/         模型权重（检测器/分类器，不入库）
+  preprocessed/ 批量输入视频（隐私，不入库）
+  finetune/     检测微调数据（M2/M4，不入库）
+  uniform_crops/工装分类数据（M3，不入库）
+models/         模型权重（不入库）
 outputs/
   json/         批量 JSON 输出
   mp4/          批量视频输出
-  evaluate/     评估产物
 docs/           方案/需求/调研/标注指南（本地，不入库）
 ```
 
@@ -40,61 +58,50 @@ python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 ```
 
-GPU 版 torch（RTX 4070 实测约 20 FPS @ yolo11x-960）：
+GPU 版 torch（RTX 4070 实测，YOLO26x + SAM2.1 离线约 1.4fps）：
 
 ```bash
 .\.venv\Scripts\pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
-标注工具（M2 用）：
-
-```bash
-.\.venv\Scripts\pip install "PyQt5==5.15.9" "PyQt5-Qt5==5.15.2" labelImg==1.8.6
-```
-
-> labelImg 1.8.6 与新版 PyQt5 不兼容，需固定 5.15.9 并打 7 处 float 兼容补丁
-> （`labelImg.py` 的 scroll/setValue、`libs/canvas.py` 的 drawRect/drawLine、
->  `libs/shape.py` 的 drawText，坐标转 int）。
-
 ## 运行
 
 ```bash
-# 单视频（输出到 outputs/json、outputs/mp4）
-python main.py run data/preprocessed/005.mp4 --no-show --json outputs/json/005.jsonl --save-video outputs/mp4/005.mp4
+# 单视频（输出 JSONL + 视频）
+python main.py run data/preprocessed/005.mp4 \
+  --json outputs/json/005.jsonl --save-video outputs/mp4/005.mp4 --no-show
 
 # 批量处理 data/preprocessed/ 下所有视频
 python main.py batch
 
 # 性能分析
 python main.py run data/preprocessed/005.mp4 --no-show --profile
-
-# ID 稳定性评估（短时遮挡恢复率，验收口径 ≥80%）
-python scripts/evaluate_id.py outputs/json/005.jsonl
 ```
 
-`--show` 显示实时预览；`--no-show` 不影响 JSON/视频输出。
+推荐使用长记忆配置（工装标签最稳定）：
 
-## 数据与模型（隐私，全部不入库）
+```bash
+python main.py --config configs/s1246_memlong.yaml run data/preprocessed/005.mp4 \
+  --json outputs/json/005.jsonl --save-video outputs/mp4/005.mp4 --no-show
+```
 
-- 源视频：`data/preprocessed/`（15 个现场视频，16GB）
-- 检测微调：375 帧人工标注（`data/finetune/`）→ 训练出 `models/yolo11x_finetuned.pt`
-- 工装分类：480 张上半身 crop 人工标注（`data/uniform_crops/sample/`）→
-  `models/uniform_cls.pt`（MobileNetV3-Small，逐类准确率 100%；
-  未穿样本仅 12 张，代表性有限，待后续补标）
+## JSONL 输出字段
 
-## 里程碑状态
+每条人员记录包含：`person_id`、`bt_id`（ByteTrack ID）、`bbox`、`uniform`（最终标签）、
+`uniform_raw`（当前帧掩码检测）、`uniform_memory`（记忆判断）、`uniform_state`、
+`uniform_prob`、`mask_polygon`、`confidence`、`restored`、`split_relation`。
 
-- M1 ✅ BoT-SORT + ReID：完整视频唯一 ID 30→24，短时遮挡恢复率 98.4%
-- M2 ✅ 检测微调：人工标注 375 帧，mAP50 0.941→0.965，已切换为默认权重
-- M3 ✅ 分类器训练：crop 480 张标注完成，模型已训练（推理接入待做）
+## 关键设计说明
 
-## 验收口径（已确定，2026-08-19）
+- **工装识别免训练**：M3 分类器未穿样本仅 12 张，改用 SAM2 人体掩码内的红色规则，
+  排除桌面/墙壁背景，不依赖标注数据。
+- **工装记忆**：`uniform_memory` 只由当前帧掩码检测结果更新（不被记忆输出污染）；
+  翻转难度随状态持续时间动态增长；穿→未穿极难（排除换装）、未穿→穿较易。
+- **隐私**：视频数据、模型权重、输出产物、docs 均不入 git，全程本地处理。
 
-- 工装：抽查 100 帧准确率 ≥95%；crop 验证集准确率 ≥95%
-- ID：短时遮挡（≤3 秒）恢复率 ≥80%；连续可见期间 ID 切换为 0（目标值）
-- 检测：现场验证集统计检出率/漏检率
-- 性能：FPS ≥15、连续运行 ≥1 小时不崩溃
+## 文档
 
-## 隐私说明
-
-全部处理在本机完成，视频与画面不出本机、不联网、不上传任何平台。
+- 最终实现方案：`docs/plan/task-a-person-detection-v0.6.md`
+- 要求文档：`docs/requirements/task-a-person-detection.md`（导师侧）
+- 问题反馈：`docs/feedback/问题反馈-任务A员工检测.md`
+- 调研笔记：`docs/research/notes/`
