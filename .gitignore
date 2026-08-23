@@ -39,17 +39,10 @@ Thumbs.db
 tmp/
 temp/
 
-# 任务 A 数据与产物（隐私视频/模型权重/输出结果不入库）
+# 数据与产物（隐私视频/模型权重/输出结果不入库）
 data/
 models/
 outputs/
 
 # 文档归档（不再跟踪，本地保留）
 docs/
-
-# 运行时生成的跟踪器配置
-configs/*
-!configs/s1246.yaml
-
-# 训练产物
-runs/

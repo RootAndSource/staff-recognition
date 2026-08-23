@@ -1,4 +1,4 @@
-# 任务 A 员工检测 - 最终配置（S1-S7 主链路）
+# StaffRecognition - 最终配置（S1-S7 主链路）
 # 离线批处理：YOLO26x + ByteTrack + SAM2.1 + 掩码工装规则 + 身份记忆
 
 video:
@@ -38,18 +38,8 @@ tracker:
   reid_model: "auto"
 
 uniform:
-  mode: "rule"             # S4：rule=掩码内工装色规则（免训练，默认）；cls=旧分类器
-  min_visible_area_ratio: 0.08   # 判定"未穿"所需最小可见面积比例（相对检测框）
-  roi_main:
-    y_begin: 0.15
-    y_end: 0.55
-    x_begin: 0.10
-    x_end: 0.90
-  roi_lower:
-    y_begin: 0.45
-    y_end: 0.85
-    x_begin: 0.10
-    x_end: 0.90
+  # S4 工装识别：掩码内工装色规则（免训练）
+  min_visible_area_ratio: 0.08   # 判定"未穿"所需最小可见面积（相对检测框）
   hsv_red:
     h1_begin: 0
     h1_end: 10
@@ -58,11 +48,7 @@ uniform:
     s_min: 70
     v_min: 70
   red_ratio_threshold: 0.08
-  baseline_factor: 1.5
   connected_min_ratio: 0.05
-  normalize: true
-  classifier_path: "models/uniform_cls.pt"   # 仅 cls 模式使用
-  classifier_only: true
 
 identity:
   # S6 工装记忆：冷启动即出标签，翻转难度随状态持续时长动态增长

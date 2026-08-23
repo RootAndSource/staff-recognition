@@ -1,4 +1,4 @@
-# 任务 A 员工检测 - Python 依赖（Python 3.10+）
+# StaffRecognition - Python 依赖（Python 3.10+）
 # GPU 推理：先装 CUDA 版 torch（见下），再装本文件
 
 opencv-python>=4.8.0
@@ -6,12 +6,10 @@ numpy>=1.24.0
 PyYAML>=6.0
 ultralytics>=8.4.0
 tqdm>=4.66.0
+Pillow>=10.0.0
 
 # 开发 / 测试
 pytest>=8.0.0
 
 # GPU 版 torch（RTX 4070 实测）：
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-
-# 标注工具（M2 数据准备，可选）：
-#   pip install "PyQt5==5.15.9" "PyQt5-Qt5==5.15.2" labelImg==1.8.6
