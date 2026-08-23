@@ -36,10 +36,14 @@
 
 ```
 src/            核心代码（检测/跟踪/身份/工装/输出）
-scripts/        工具脚本（S1/S2/S5 组合、训练、评估、对比）
+scripts/
+  pipeline/     主线组合脚本（S1/S2/S5、对比、渲染、扫描）
+  train/        数据准备与训练（M2/M3）
+  eval/         评估脚本
+  tools/        辅助工具
 tests/          单元测试
-config.yaml     默认全链路配置
-configs/        运行配置（s1246.yaml、s1246_memlong.yaml）
+config.yaml     默认全链路配置（最终定案）
+configs/        s1246.yaml（正式配置，入库；bytetrack.yaml 运行时生成，不入库）
 data/
   preprocessed/ 批量输入视频（隐私，不入库）
   finetune/     检测微调数据（M2/M4，不入库）
@@ -78,12 +82,7 @@ python main.py batch
 python main.py run data/preprocessed/005.mp4 --no-show --profile
 ```
 
-推荐使用长记忆配置（工装标签最稳定）：
-
-```bash
-python main.py --config configs/s1246_memlong.yaml run data/preprocessed/005.mp4 \
-  --json outputs/json/005.jsonl --save-video outputs/mp4/005.mp4 --no-show
-```
+config.yaml 即最终定案配置（长记忆），直接 `python main.py run ...` 即可。
 
 ## JSONL 输出字段
 
