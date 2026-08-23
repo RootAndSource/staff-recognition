@@ -69,13 +69,13 @@ def main(argv: list[str] | None = None) -> int:
             f"累计人次 {stats.persons_total}；工装人次 {stats.uniform_count}"
         )
     elif args.command == "calibrate":
-        from scripts.calibrate import run_calibrate
+        from scripts.tools.calibrate import run_calibrate
 
         run_calibrate(args.image, cfg)
     elif args.command == "batch":
         run_batch(cfg, args)
     elif args.command == "evaluate":
-        from scripts.evaluate import run_evaluate
+        from scripts.eval.evaluate import run_evaluate
 
         run_evaluate(cfg, video=args.video, sample_count=args.frames)
     else:

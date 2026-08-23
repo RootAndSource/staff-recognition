@@ -1,8 +1,12 @@
-"""主处理管线：逐帧 检测→跟踪→工装识别→输出 的串联。"""
+"""主处理链路：逐帧 检测→跟踪→分割→工装识别→身份状态→输出 的串联（S1-S7）。
+
+最终方案固定为 segmentation 模式：YOLO26x 全身框 + ByteTrack + SAM2.1 掩码
++ 掩码工装规则 + IdentityTracker 记忆状态机。历史双检测融合（upper/full）与
+实例外观归并（M6）已移除。
+"""
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 import time
@@ -14,15 +18,27 @@ from tqdm import tqdm
 
 from .config import load_config
 from .detector import PersonDetector
-from .fusion import DetectionFusion
 from .segmentor import load_segmentation_engine
 from .identity import IdentityTracker
-from .instance_merge import InstanceMerger
 from .output import JsonOutputWriter, build_person_record
 from .tracker import ByteTrackTracker
 from .uniform import UniformClassifier, _RoiSpec
 from .video_input import VideoSource
 from .visualizer import draw_stats, draw_tracked
+
+
+@dataclass
+class FusedDetection:
+    """分割链路上的融合目标：全身框 + SAM2 掩码 + 派生信息。"""
+
+    xyxy: np.ndarray
+    confidence: float
+    box_type: str                 # "mask"（分割模式）
+    upper_roi: tuple[int, int, int, int]  # 兼容旧分类器 ROI（rule 模式不使用）
+    bt_key: str = ""              # 底层 ByteTrack 键
+    is_confirmed: bool = True
+    mask: np.ndarray | None = None       # HxW bool 实例掩码
+    polygon_norm: np.ndarray | None = None  # 归一化多边形（JSONL 输出）
 
 
 @dataclass
@@ -65,11 +81,11 @@ def _scale_records(records: list[dict], scale: float, raw_w: int, raw_h: int) ->
 
 
 class DetectionPipeline:
-    """任务 A 主管线。"""
+    """任务 A 主链路（S1-S7）。"""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self.config = config or load_config()
-        self.max_frames: int = 0  # 0=不限；>0 表示最多处理 N 帧（调试/测试用）
+        self.max_frames: int = 0  # 0=不限制；>0 表示最多处理 N 帧（调试/测试用）
         vcfg, mcfg, tcfg, ucfg, ocfg = (
             self.config["video"],
             self.config["model"],
@@ -80,65 +96,39 @@ class DetectionPipeline:
         self.video_cfg = vcfg
         self.output_cfg = ocfg
         scfg = self.config.get("segmentation", {})
-        self.seg_mode = bool(scfg.get("enabled", False))
         self.segmentor = None
         self.min_box_size = int(mcfg.get("min_box_size", 0))
-        self.full_interval = int(mcfg.get("full_interval", 3))
-        upper_w = mcfg.get("upper_weights") or mcfg["weights"]
-        full_w = mcfg.get("full_weights") or mcfg["weights"]
-        if self.seg_mode:
-            seg_w = scfg.get("det_weights") or full_w
-            self.seg_detector = PersonDetector(
-                weights=seg_w,
-                conf_thres=mcfg["conf_thres"],
-                iou_thres=mcfg["iou_thres"],
-                imgsz=mcfg["imgsz"],
-                device=mcfg.get("device", ""),
-            )
-            self.upper_detector = self.seg_detector
-            self.full_detector = self.seg_detector
-        else:
-            self.upper_detector = PersonDetector(
-                weights=upper_w,
-                conf_thres=mcfg["conf_thres"],
-                iou_thres=mcfg["iou_thres"],
-                imgsz=mcfg["imgsz"],
-                device=mcfg.get("device", ""),
-            )
-            self.full_detector = PersonDetector(
-                weights=full_w,
-                conf_thres=mcfg["conf_thres"],
-                iou_thres=mcfg["iou_thres"],
-                imgsz=mcfg["imgsz"],
-                device=mcfg.get("device", ""),
-            )
-        self.detector = self.upper_detector
 
-        def _make_tracker(det):
-            return ByteTrackTracker(
-                track_high_thresh=tcfg["track_high_thresh"],
-                track_low_thresh=tcfg["track_low_thresh"],
-                new_track_thresh=tcfg["new_track_thresh"],
-                detector=det,
-                merge_overlap_iou=float(tcfg.get("merge_overlap_iou", 0.3)),
-                tracker_yaml=str(
-                    ByteTrackTracker.write_tracker_yaml(
-                        Path("configs") / "bytetrack.yaml",
-                        track_buffer=int(tcfg["track_buffer"]),
-                        track_high_thresh=float(tcfg["track_high_thresh"]),
-                        track_low_thresh=float(tcfg["track_low_thresh"]),
-                        new_track_thresh=float(tcfg["new_track_thresh"]),
-                        tracker_type=str(tcfg.get("name", "botsort")),
-                        with_reid=bool(tcfg.get("with_reid", True)),
-                        appearance_thresh=float(tcfg.get("appearance_thresh", 0.8)),
-                        reid_model=str(tcfg.get("reid_model", "auto")),
-                    )
-                ),
-            )
+        # S1 全身检测 + S5 跟踪：共用同一 YOLO 实例（track 内部包含检测）
+        self.detector = PersonDetector(
+            weights=scfg.get("det_weights") or mcfg.get("full_weights") or mcfg["weights"],
+            conf_thres=mcfg["conf_thres"],
+            iou_thres=mcfg["iou_thres"],
+            imgsz=mcfg["imgsz"],
+            device=mcfg.get("device", ""),
+        )
+        self.tracker = ByteTrackTracker(
+            track_high_thresh=tcfg["track_high_thresh"],
+            track_low_thresh=tcfg["track_low_thresh"],
+            new_track_thresh=tcfg["new_track_thresh"],
+            detector=self.detector,
+            merge_overlap_iou=float(tcfg.get("merge_overlap_iou", 0.3)),
+            tracker_yaml=str(
+                ByteTrackTracker.write_tracker_yaml(
+                    Path("configs") / "bytetrack.yaml",
+                    track_buffer=int(tcfg["track_buffer"]),
+                    track_high_thresh=float(tcfg["track_high_thresh"]),
+                    track_low_thresh=float(tcfg["track_low_thresh"]),
+                    new_track_thresh=float(tcfg["new_track_thresh"]),
+                    tracker_type=str(tcfg.get("name", "bytetrack")),
+                    with_reid=bool(tcfg.get("with_reid", False)),
+                    appearance_thresh=float(tcfg.get("appearance_thresh", 0.8)),
+                    reid_model=str(tcfg.get("reid_model", "auto")),
+                )
+            ),
+        )
 
-        self.upper_tracker = _make_tracker(self.upper_detector)
-        self.full_tracker = _make_tracker(self.full_detector)
-        self.tracker = self.upper_tracker  # ?????
+        # S4 工装识别：掩码内工装色规则（默认 rule；cls 保留旧分类器为备选）
         self.uniform = UniformClassifier(
             roi_main=_RoiSpec(
                 ucfg["roi_main"]["x_begin"], ucfg["roi_main"]["y_begin"],
@@ -154,6 +144,8 @@ class DetectionPipeline:
             v_min=ucfg["hsv_red"]["v_min"],
             red_ratio_threshold=ucfg["red_ratio_threshold"],
             normalize=ucfg.get("normalize", True),
+            baseline_factor=ucfg.get("baseline_factor", 1.5),
+            connected_min_ratio=ucfg.get("connected_min_ratio", 0.05),
             classifier_path=ucfg.get("classifier_path"),
             classifier_only=bool(ucfg.get("classifier_only", True)),
             mode=str(ucfg.get("mode", "rule")),
@@ -171,51 +163,40 @@ class DetectionPipeline:
             uniform_pending_frames=int(icfg.get("uniform_pending_frames", 10)),
             uniform_window=int(icfg.get("uniform_window", 30)),
             uniform_confirm_frames=int(icfg.get("uniform_confirm_frames", 60)),
-              uniform_confirm_high=float(icfg.get("uniform_confirm_high", 0.9)),
-              reverse_streak_frames=int(icfg.get("reverse_streak_frames", 5)),
-              uniform_reverse_base=int(icfg.get("uniform_reverse_base", 3)),
-              uniform_reverse_true_base=int(icfg.get("uniform_reverse_true_base", 60)),
-              uniform_reverse_growth=float(icfg.get("uniform_reverse_growth", 0.05)),
-              uniform_reverse_max=int(icfg.get("uniform_reverse_max", 240)),
-              memory_gain=float(icfg.get("memory_gain", 0.04)),
-              memory_decay=float(icfg.get("memory_decay", 0.02)),
-              memory_hold_threshold=float(icfg.get("memory_hold_threshold", 0.6)),
-              track_ttl_frames=int(icfg.get("track_ttl_frames", 300)),
-              boundary_ttl_frames=int(icfg.get("boundary_ttl_frames", 60)),
-              match_distance_factor=float(icfg.get("match_distance_factor", 2.5)),
-              appearance_corr_threshold=float(icfg.get("appearance_corr_threshold", 0.85)),
-              person_confirm_frames=int(icfg.get("person_confirm_frames", 3)),
-              leave_visible_ratio=float(icfg.get("leave_visible_ratio", 0.4)),
-          )
+            uniform_confirm_high=float(icfg.get("uniform_confirm_high", 0.9)),
+            reverse_streak_frames=int(icfg.get("reverse_streak_frames", 5)),
+            uniform_reverse_base=int(icfg.get("uniform_reverse_base", 3)),
+            uniform_reverse_true_base=int(icfg.get("uniform_reverse_true_base", 60)),
+            uniform_reverse_growth=float(icfg.get("uniform_reverse_growth", 0.05)),
+            uniform_reverse_max=int(icfg.get("uniform_reverse_max", 240)),
+            memory_gain=float(icfg.get("memory_gain", 0.04)),
+            memory_decay=float(icfg.get("memory_decay", 0.02)),
+            memory_hold_threshold=float(icfg.get("memory_hold_threshold", 0.6)),
+            track_ttl_frames=int(icfg.get("track_ttl_frames", 300)),
+            boundary_ttl_frames=int(icfg.get("boundary_ttl_frames", 60)),
+            match_distance_factor=float(icfg.get("match_distance_factor", 2.5)),
+            appearance_corr_threshold=float(icfg.get("appearance_corr_threshold", 0.85)),
+            person_confirm_frames=int(icfg.get("person_confirm_frames", 3)),
+            leave_visible_ratio=float(icfg.get("leave_visible_ratio", 0.4)),
+        )
         # 启动时加载模型，加载失败尽早暴露（而非逐帧崩溃）
-        self.fusion = DetectionFusion()
-        self.merger = None
-        if self.seg_mode:
-            self.segmentor = load_segmentation_engine(self.config, det_model=self.seg_detector)
-            # Appearance ReID merging is disabled (Phase 0 calibration: both the
-            # detector embedding and OSNet overlap between same/different person),
-            # awaiting the v0.7 design before re-enabling.
-            if bool(scfg.get("merge_enabled", False)):
-                self.merger = InstanceMerger(None)
-        self.upper_detector.load()
-        self.full_detector.load()
+        self.detector.load()
+        self.segmentor = load_segmentation_engine(self.config, det_model=self.detector)
 
     def _segment_frame(self, frame_bgr: cv2.Mat) -> list[Any]:
-        """分割模式：ByteTrack 跟踪派生框 + SAM2 掩码 -> FusedDetection 列表。"""
-        tracked = self.upper_tracker.update(frame_bgr, detections=[])
+        """S1→S5→S2：跟踪派生框 + SAM2 掩码 → FusedDetection 列表。"""
+        tracked = self.tracker.update(frame_bgr, detections=[])
         if not tracked:
             return []
         boxes = np.array([o.xyxy for o in tracked], dtype=float)
         confs = np.array([o.confidence for o in tracked], dtype=float)
         insts = self.segmentor.segment_with_boxes(frame_bgr, boxes, confs)
-        from .fusion import FusedDetection
         fused = []
         for o, inst in zip(tracked, insts):
             if inst is None:
                 continue
             x1, y1, x2, y2 = [int(v) for v in inst.xyxy]
-            # M3 分类器训练 crop = 合并肩胸(0.15-0.55) + 腰腹(0.45-0.85) 双 ROI，
-            # 即 x 0.10-0.90、y 0.15-0.85；这里保持一致（不含头部/腿部）。
+            # S4 规则使用完整可见掩码，不再需要矩形 upper_roi
             bw, bh = x2 - x1, y2 - y1
             roi = (
                 int(x1 + 0.10 * bw), int(y1 + 0.15 * bh),
@@ -241,26 +222,11 @@ class DetectionPipeline:
         frame_id: int,
         timestamp_ms: float,
     ) -> tuple[list[dict[str, Any]], int, int]:
-        """??????? (json_records, ??, ????)?"""
+        """处理单帧，返回 (json_records, 人数, 工装人次)。"""
         t0 = time.perf_counter()
-        if self.seg_mode:
-            fused = self._segment_frame(frame_bgr)
-            frame_h, frame_w = frame_bgr.shape[:2]
-            t1 = t2 = t3 = time.perf_counter()
-        else:
-            upper_objs = self.upper_tracker.update(frame_bgr, detections=[])
-            t1 = time.perf_counter()
-            full_objs = []
-            if self.full_interval and (frame_id % self.full_interval == 0 or not upper_objs):
-                full_objs = self.full_tracker.update(frame_bgr, detections=[])
-            t2 = time.perf_counter()
-            frame_h, frame_w = frame_bgr.shape[:2]
-            fused = self.fusion.fuse(
-                [(o.track_id, o.xyxy, o.confidence) for o in upper_objs],
-                [(o.track_id, o.xyxy, o.confidence) for o in full_objs],
-                frame_w, frame_h,
-            )
-            t3 = time.perf_counter()
+        fused = self._segment_frame(frame_bgr)
+        frame_h, frame_w = frame_bgr.shape[:2]
+        t1 = t2 = time.perf_counter()
         uniform_results: dict[str, Any] = {}
         confirmed = [
             f for f in fused
@@ -275,11 +241,9 @@ class DetectionPipeline:
                     frame_bgr, confirmed, rois=[f.upper_roi for f in confirmed]
                 )
             uniform_results = {f.bt_key: res for f, res in zip(confirmed, batch)}
-        t4 = time.perf_counter()
+        t3 = time.perf_counter()
 
         persons = self.identity.update(frame_id, frame_bgr, fused, uniform_results)
-        if self.seg_mode and self.merger is not None:
-            persons = self.merger.process(frame_bgr, persons, frame_id)
         records: list[dict[str, Any]] = []
         uniform_count = 0
         for p in persons:
@@ -288,12 +252,13 @@ class DetectionPipeline:
             records.append(build_person_record(p))
             if p.uniform:
                 uniform_count += 1
-        t5 = time.perf_counter()
+        t4 = time.perf_counter()
         if self.output_cfg.get("profile", False):
             self._perf_times["track"].append((t2 - t0) * 1000)
-            self._perf_times["uniform"].append((t4 - t3) * 1000)
-            self._perf_times["identity"].append((t5 - t4) * 1000)
+            self._perf_times["uniform"].append((t3 - t2) * 1000)
+            self._perf_times["identity"].append((t4 - t3) * 1000)
         return records, len(persons), uniform_count
+
     def run(
         self,
         source: str,
@@ -304,7 +269,6 @@ class DetectionPipeline:
         stats = PipelineStats()
         json_writer = JsonOutputWriter(json_path) if json_path else None
         video_writer: cv2.VideoWriter | None = None
-        # 绘制叠加层：只要保存视频或显示窗口，就绘制检测框/标签/统计
         self._should_draw = bool(save_video) or bool(self.output_cfg.get("show", False))
         profile = bool(self.output_cfg.get("profile", False))
         profile_times: list[tuple[str, float]] = []
@@ -340,9 +304,7 @@ class DetectionPipeline:
                     )
                     t_done = time.perf_counter()
                     if profile:
-                        profile_times.append(
-                            ("pipeline_total", (t_done - t_frame) * 1000)
-                        )
+                        profile_times.append(("pipeline_total", (t_done - t_frame) * 1000))
                         self._perf_times["pipeline_total"].append((t_done - t_frame) * 1000)
                     stats.frames_processed += 1
                     stats.persons_total += person_count

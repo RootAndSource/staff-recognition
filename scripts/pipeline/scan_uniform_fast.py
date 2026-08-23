@@ -12,7 +12,7 @@ import numpy as np
 from tqdm import tqdm
 from ultralytics import YOLO
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
 def red_ratio(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> float:
