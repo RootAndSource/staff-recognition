@@ -59,27 +59,31 @@ def _tr(**kw) -> IdentityTracker:
     return IdentityTracker(**defaults)
 
 
-def test_pending_period_outputs_none() -> None:
-    tr = _tr(uniform_pending_frames=5)
-    for i in range(4):  # 观察期内
-        persons = tr.update(i, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(True)})
-    assert persons[0].uniform is None
-    assert persons[0].uniform_state == UNIFORM_PENDING
+def test_cold_start_outputs_label_immediately() -> None:
+    # 新设计：冷启动直接出标签（无 pending），记忆从低置信开始
+    tr = _tr(uniform_pending_frames=5, person_confirm_frames=1)
+    persons = tr.update(0, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(True)})
+    assert persons[0].uniform is True
+    assert persons[0].uniform_state == UNIFORM_ACTIVE
 
 
 def test_uniform_label_stays_without_flip() -> None:
     tr = _tr()
-    # 前 2 帧观察期 + 3 帧工装 → ACTIVE 已穿
+    # 冷启动即出标签，持续穿工装建立记忆
     for i in range(5):
         persons = tr.update(i, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(True)})
     assert persons[0].uniform is True
     assert persons[0].uniform_state == UNIFORM_ACTIVE
-    # 2 帧反向证据（< 3 帧阈值）→ 不翻转
+    # 2 帧反向证据（不足以翻转）→ 保持穿
     for i in range(5, 7):
         persons = tr.update(i, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(False)})
     assert persons[0].uniform is True
-    # 第 3 帧连续反向 → 翻转
+    # 第 3 帧反向：未串->串基准 3 帧可翻，但记忆压制仍保持穿（排除换装）
     persons = tr.update(7, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(False)})
+    assert persons[0].uniform is True
+    # 持续反向直到超过动态阈值才翻转
+    for i in range(8, 70):
+        persons = tr.update(i, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(False)})
     assert persons[0].uniform is False
 
 
@@ -108,13 +112,17 @@ def test_uniform_upgrade_from_no_uniform() -> None:
 
 def test_uniform_confirmed_marker() -> None:
     tr = _tr()
-    # 持续工装超过 confirm_frames → CONFIRMED 标记（不阻止翻转）
+    # 持续工装超过 confirm_frames → CONFIRMED 标记
     for i in range(10):
         persons = tr.update(i, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(True)})
     assert persons[0].uniform is True
     assert persons[0].uniform_state == UNIFORM_CONFIRMED
-    # 连续 3 帧反向 → 仍可翻转（高置信不锁定）
+    # 连续 3 帧反向不足以翻转（记忆压制）
     for i in range(10, 13):
+        persons = tr.update(i, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(False)})
+    assert persons[0].uniform is True
+    # 持续反向超过动态阈值才翻转（不锁死）
+    for i in range(13, 80):
         persons = tr.update(i, _frame(), [_obj(1, [50, 50, 150, 250])], {1: _uniform(False)})
     assert persons[0].uniform is False
 
