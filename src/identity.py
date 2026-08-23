@@ -1,11 +1,9 @@
-"""身份与工装状态管理层（位于 ByteTrack 之上）。
-
+"""StaffRecognition - S6 身份与工装状态管理（位于 ByteTrack 之上）。
 两条领域先验：
 1. 画面内的员工不会凭空消失：目标消失后暂存（10 秒）并做位置/外观匹配，
    重新出现必须复用原 person_id；只有走出画面边界才允许释放（再进来是新 ID）。
-2. 工装标签用延迟态状态机（pending/active/confirmed），翻转需要连续反向证据，
-   不永久锁定、可被纠正。
-"""
+2. 工装标签用记忆状态机（冷启动即出标签 + 动态翻转难度）：
+   翻转需连续反向证据，穿→未穿极难（排除换装）、未穿→穿较易。"""
 
 from __future__ import annotations
 
@@ -41,8 +39,6 @@ class PersonObject:
     red_ratio_connected: float = 0.0   # 最大红色连通域占比（判定依据）
     mask: np.ndarray | None = None            # HxW bool 实例掩码（分割模式）
     polygon_norm: np.ndarray | None = None    # 归一化多边形（JSONL 输出）
-    parts: list = field(default_factory=list)      # v0.6: 实例部件列表（分裂归并后）
-    split_relation: bool = False                   # v0.6: 本帧是否为分裂归并产物
     baseline_ratio: float = 0.0        # 场景红色基线（判定依据）
 
 
@@ -108,14 +104,6 @@ class _PersonState:
         self.last_box = box
         self.last_frame_id = frame_id
 
-    def predicted_center(self, frame_id: int) -> np.ndarray:
-        if self.last_center is None:
-            return np.zeros(2)
-        if self.last_velocity is not None and frame_id > self.last_frame_id:
-            return self.last_center + self.last_velocity * (frame_id - self.last_frame_id)
-        return self.last_center
-
-
 class IdentityTracker:
     """稳定身份与工装状态管理。
 
@@ -171,14 +159,6 @@ class IdentityTracker:
         self._persons: dict[int, _PersonState] = {}
         self._stored: dict[int, _StoredTrack] = {}
         self._pending: dict[str, _PendingCandidate] = {}
-        self._next_person_id = 1
-        self.stats = {"restored": 0, "released_boundary": 0, "new_persons": 0}
-
-    def reset(self) -> None:
-        self._bt_to_person.clear()
-        self._persons.clear()
-        self._stored.clear()
-        self._pending.clear()
         self._next_person_id = 1
         self.stats = {"restored": 0, "released_boundary": 0, "new_persons": 0}
 

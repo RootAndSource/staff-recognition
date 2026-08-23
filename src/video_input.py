@@ -1,4 +1,4 @@
-"""视频输入：本地视频文件或 RTSP 流读取、降采样、丢帧。"""
+"""StaffRecognition - 视频输入：本地视频文件或 RTSP 流读取、降采样、丢帧。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""配置加载：读取 config.yaml，返回嵌套字典/对象。"""
+"""StaffRecognition - 配置加载：读取 config.yaml，返回嵌套字典对象。"""
 
 from __future__ import annotations
 

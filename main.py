@@ -1,9 +1,8 @@
-"""任务 A 员工检测 - 命令行入口。
+"""StaffRecognition - 命令行入口。
 
 用法示例：
     python main.py run path/to/video.mp4 --config config.yaml --json outputs/json/out.jsonl
     python main.py run rtsp://user:pass@host:554/stream --show
-    python main.py calibrate path/to/frame.jpg
     python main.py evaluate --frames 100
 """
 
@@ -18,7 +17,7 @@ from src.pipeline import DetectionPipeline
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="任务 A 员工检测（人员检测 + 工装识别）")
+    parser = argparse.ArgumentParser(description="StaffRecognition 员工检测与工装识别")
     parser.add_argument("--config", default="config.yaml", help="配置文件路径（默认 config.yaml）")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -37,9 +36,6 @@ def build_parser() -> argparse.ArgumentParser:
     batch_p.add_argument("--mp4-dir", default=None, help="视频输出目录（默认 outputs/mp4）")
     batch_p.add_argument("--max-frames", type=int, default=0, help="每个视频最多处理 N 帧（0=不限制）")
     batch_p.add_argument("--workers", type=int, default=None, help="并行进程数（默认取 config 的 batch.workers）")
-
-    cal_p = sub.add_parser("calibrate", help="交互标定 HSV / ROI 参数")
-    cal_p.add_argument("image", help="现场截图路径")
 
     ev_p = sub.add_parser("evaluate", help="抽帧 + 人工标注 + 指标计算")
     ev_p.add_argument("--video", default=None, help="评估用视频路径")
@@ -68,10 +64,6 @@ def main(argv: list[str] | None = None) -> int:
             f"[完成] 处理 {stats.frames_processed} 帧；"
             f"累计人次 {stats.persons_total}；工装人次 {stats.uniform_count}"
         )
-    elif args.command == "calibrate":
-        from scripts.tools.calibrate import run_calibrate
-
-        run_calibrate(args.image, cfg)
     elif args.command == "batch":
         run_batch(cfg, args)
     elif args.command == "evaluate":
@@ -86,8 +78,6 @@ def main(argv: list[str] | None = None) -> int:
 
 def run_batch(cfg: dict, args: argparse.Namespace) -> None:
     """批量处理：输入目录下所有视频 → outputs/json、outputs/mp4 分类输出。"""
-    import re
-
     bcfg = cfg.get("batch", {})
     input_dir = Path(args.input_dir or bcfg.get("input_dir", "data/preprocessed"))
     json_dir = Path(args.json_dir or bcfg.get("json_dir", "outputs/json"))

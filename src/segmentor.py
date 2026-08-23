@@ -1,14 +1,8 @@
-"""M5 实例分割引擎：检测器出框 + SAM2 box-prompt 生成人体实例掩码。
-
-路线说明（2026-08-21 调整）：放弃 YOLO11-seg 微调，直接用最强的现成
-分割模型（SAM2.1 large）作为分割底座（导师 v0.5 的"检测器 + SAM2"备选
-流程转主线）。掩码语义为"可见部分"，派生框仅用于跟踪与输出。
-"""
+"""StaffRecognition - S2 实例分割引擎：S1 全身框 + SAM2.1 box-prompt 生成人体可见实例掩码（遮挡多块归同一框）。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -119,7 +113,7 @@ def load_segmentation_engine(cfg: dict, det_model=None) -> SegmentationEngine:
     scfg = cfg.get("segmentation", {})
     mcfg = cfg.get("model", {})
     return SegmentationEngine(
-        det_weights=scfg.get("det_weights") or mcfg.get("full_weights") or mcfg["weights"],
+        det_weights=scfg.get("det_weights") or mcfg["weights"],
         det_model=det_model,
         sam_weights=scfg.get("sam_weights", "models/sam2.1_l.pt"),
         conf_thres=scfg.get("conf_thres", mcfg.get("conf_thres", 0.25)),

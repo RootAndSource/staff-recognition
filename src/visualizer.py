@@ -1,4 +1,4 @@
-"""实时画面叠加：检测框 + 置信度 + 工装标签。"""
+"""StaffRecognition - 画面叠加：检测框 + 掩码 + 工装标签。"""
 
 from __future__ import annotations
 

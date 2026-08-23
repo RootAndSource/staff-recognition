@@ -1,14 +1,13 @@
-"""主处理链路：逐帧 检测→跟踪→分割→工装识别→身份状态→输出 的串联（S1-S7）。
-
+"""StaffRecognition - 主处理链路（S1-S7）：逐帧 检测→跟踪→分割→工装识别→身份状态→输出 的串联。
 最终方案固定为 segmentation 模式：YOLO26x 全身框 + ByteTrack + SAM2.1 掩码
 + 掩码工装规则 + IdentityTracker 记忆状态机。历史双检测融合（upper/full）与
-实例外观归并（M6）已移除。
-"""
+实例外观归并（M6）已移除。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import tempfile
 import time
 from typing import Any
 
@@ -22,7 +21,7 @@ from .segmentor import load_segmentation_engine
 from .identity import IdentityTracker
 from .output import JsonOutputWriter, build_person_record
 from .tracker import ByteTrackTracker
-from .uniform import UniformClassifier, _RoiSpec
+from .uniform import UniformClassifier
 from .video_input import VideoSource
 from .visualizer import draw_stats, draw_tracked
 
@@ -34,7 +33,6 @@ class FusedDetection:
     xyxy: np.ndarray
     confidence: float
     box_type: str                 # "mask"（分割模式）
-    upper_roi: tuple[int, int, int, int]  # 兼容旧分类器 ROI（rule 模式不使用）
     bt_key: str = ""              # 底层 ByteTrack 键
     is_confirmed: bool = True
     mask: np.ndarray | None = None       # HxW bool 实例掩码
@@ -63,25 +61,12 @@ def _scale_records(records: list[dict], scale: float, raw_w: int, raw_h: int) ->
                 [float(x) * raw_w, float(y) * raw_h]
                 for x, y in r["mask_polygon"]
             ]
-        if "parts" in r and r["parts"]:
-            parts = []
-            for part in r["parts"]:
-                pp = dict(part)
-                if part.get("bbox"):
-                    pp["bbox"] = [float(v) * scale for v in part["bbox"]]
-                if part.get("mask_polygon"):
-                    pp["mask_polygon"] = [
-                        [float(x) * raw_w, float(y) * raw_h]
-                        for x, y in part["mask_polygon"]
-                    ]
-                parts.append(pp)
-            r["parts"] = parts
         out.append(r)
     return out
 
 
 class DetectionPipeline:
-    """任务 A 主链路（S1-S7）。"""
+    """StaffRecognition 主链路（S1-S7）。"""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self.config = config or load_config()
@@ -101,7 +86,7 @@ class DetectionPipeline:
 
         # S1 全身检测 + S5 跟踪：共用同一 YOLO 实例（track 内部包含检测）
         self.detector = PersonDetector(
-            weights=scfg.get("det_weights") or mcfg.get("full_weights") or mcfg["weights"],
+            weights=scfg.get("det_weights") or mcfg["weights"],
             conf_thres=mcfg["conf_thres"],
             iou_thres=mcfg["iou_thres"],
             imgsz=mcfg["imgsz"],
@@ -115,40 +100,23 @@ class DetectionPipeline:
             merge_overlap_iou=float(tcfg.get("merge_overlap_iou", 0.3)),
             tracker_yaml=str(
                 ByteTrackTracker.write_tracker_yaml(
-                    Path("configs") / "bytetrack.yaml",
+                    Path(tempfile.gettempdir()) / "staffrecognition_bytetrack.yaml",
                     track_buffer=int(tcfg["track_buffer"]),
                     track_high_thresh=float(tcfg["track_high_thresh"]),
                     track_low_thresh=float(tcfg["track_low_thresh"]),
                     new_track_thresh=float(tcfg["new_track_thresh"]),
-                    tracker_type=str(tcfg.get("name", "bytetrack")),
-                    with_reid=bool(tcfg.get("with_reid", False)),
-                    appearance_thresh=float(tcfg.get("appearance_thresh", 0.8)),
-                    reid_model=str(tcfg.get("reid_model", "auto")),
                 )
             ),
         )
 
         # S4 工装识别：掩码内工装色规则（默认 rule；cls 保留旧分类器为备选）
         self.uniform = UniformClassifier(
-            roi_main=_RoiSpec(
-                ucfg["roi_main"]["x_begin"], ucfg["roi_main"]["y_begin"],
-                ucfg["roi_main"]["x_end"], ucfg["roi_main"]["y_end"],
-            ),
-            roi_lower=_RoiSpec(
-                ucfg["roi_lower"]["x_begin"], ucfg["roi_lower"]["y_begin"],
-                ucfg["roi_lower"]["x_end"], ucfg["roi_lower"]["y_end"],
-            ),
             hsv_ranges=((ucfg["hsv_red"]["h1_begin"], ucfg["hsv_red"]["h1_end"]),
                         (ucfg["hsv_red"]["h2_begin"], ucfg["hsv_red"]["h2_end"])),
             s_min=ucfg["hsv_red"]["s_min"],
             v_min=ucfg["hsv_red"]["v_min"],
             red_ratio_threshold=ucfg["red_ratio_threshold"],
-            normalize=ucfg.get("normalize", True),
-            baseline_factor=ucfg.get("baseline_factor", 1.5),
             connected_min_ratio=ucfg.get("connected_min_ratio", 0.05),
-            classifier_path=ucfg.get("classifier_path"),
-            classifier_only=bool(ucfg.get("classifier_only", True)),
-            mode=str(ucfg.get("mode", "rule")),
             min_visible_area_ratio=float(ucfg.get("min_visible_area_ratio", 0.08)),
         )
         self._perf_times: dict[str, list[float]] = {
@@ -195,19 +163,11 @@ class DetectionPipeline:
         for o, inst in zip(tracked, insts):
             if inst is None:
                 continue
-            x1, y1, x2, y2 = [int(v) for v in inst.xyxy]
-            # S4 规则使用完整可见掩码，不再需要矩形 upper_roi
-            bw, bh = x2 - x1, y2 - y1
-            roi = (
-                int(x1 + 0.10 * bw), int(y1 + 0.15 * bh),
-                int(x1 + 0.90 * bw), int(y1 + 0.85 * bh),
-            )
             fused.append(
                 FusedDetection(
                     xyxy=inst.xyxy,
                     confidence=inst.confidence,
                     box_type="mask",
-                    upper_roi=roi,
                     bt_key=f"s{o.track_id}",
                     is_confirmed=o.is_confirmed,
                     mask=inst.mask,
@@ -234,12 +194,7 @@ class DetectionPipeline:
             and (not self.min_box_size or min(f.xyxy[2]-f.xyxy[0], f.xyxy[3]-f.xyxy[1]) >= self.min_box_size)
         ]
         if confirmed:
-            if self.uniform.mode == "rule":
-                batch = self.uniform.classify_masks(frame_bgr, confirmed)
-            else:
-                batch = self.uniform.classify_batch(
-                    frame_bgr, confirmed, rois=[f.upper_roi for f in confirmed]
-                )
+            batch = self.uniform.classify_masks(frame_bgr, confirmed)
             uniform_results = {f.bt_key: res for f, res in zip(confirmed, batch)}
         t3 = time.perf_counter()
 
@@ -328,7 +283,7 @@ class DetectionPipeline:
                         video_writer.write(frame)
 
                     if self.output_cfg["show"]:
-                        cv2.imshow("Task A - 员工检测", frame)
+                        cv2.imshow("StaffRecognition", frame)
                         if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                             break
 

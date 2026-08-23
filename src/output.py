@@ -1,4 +1,4 @@
-"""结构化输出：时间、人员 ID、bbox、工装标签、置信度，JSON 逐帧或降频写出。"""
+"""StaffRecognition - S7 结构化输出：时间、person_id、bbox、工装标签、置信度，JSON 逐帧或降频写出。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from .identity import PersonObject
-from .uniform import UniformResult
 
 
 class JsonOutputWriter:
@@ -72,8 +71,6 @@ def build_person_record(
         "red_ratio_connected": round(person.red_ratio_connected, 4),
         "baseline_ratio": round(person.baseline_ratio, 4),
         "confidence": round(person.confidence, 4),
-        "parts": person.parts if person.parts else None,
-        "split_relation": bool(person.split_relation),
         "mask_polygon": (
             [[round(float(x), 6), round(float(y), 6)] for x, y in person.polygon_norm]
             if person.polygon_norm is not None
