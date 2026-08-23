@@ -156,6 +156,8 @@ class DetectionPipeline:
             normalize=ucfg.get("normalize", True),
             classifier_path=ucfg.get("classifier_path"),
             classifier_only=bool(ucfg.get("classifier_only", True)),
+            mode=str(ucfg.get("mode", "rule")),
+            min_visible_area_ratio=float(ucfg.get("min_visible_area_ratio", 0.08)),
         )
         self._perf_times: dict[str, list[float]] = {
             "track": [],
@@ -171,6 +173,13 @@ class DetectionPipeline:
             uniform_confirm_frames=int(icfg.get("uniform_confirm_frames", 60)),
               uniform_confirm_high=float(icfg.get("uniform_confirm_high", 0.9)),
               reverse_streak_frames=int(icfg.get("reverse_streak_frames", 5)),
+              uniform_reverse_base=int(icfg.get("uniform_reverse_base", 3)),
+              uniform_reverse_true_base=int(icfg.get("uniform_reverse_true_base", 60)),
+              uniform_reverse_growth=float(icfg.get("uniform_reverse_growth", 0.05)),
+              uniform_reverse_max=int(icfg.get("uniform_reverse_max", 240)),
+              memory_gain=float(icfg.get("memory_gain", 0.04)),
+              memory_decay=float(icfg.get("memory_decay", 0.02)),
+              memory_hold_threshold=float(icfg.get("memory_hold_threshold", 0.6)),
               track_ttl_frames=int(icfg.get("track_ttl_frames", 300)),
               boundary_ttl_frames=int(icfg.get("boundary_ttl_frames", 60)),
               match_distance_factor=float(icfg.get("match_distance_factor", 2.5)),
@@ -205,7 +214,13 @@ class DetectionPipeline:
             if inst is None:
                 continue
             x1, y1, x2, y2 = [int(v) for v in inst.xyxy]
-            roi = (x1, y1, x2, y1 + int(0.55 * (y2 - y1)))
+            # M3 分类器训练 crop = 合并肩胸(0.15-0.55) + 腰腹(0.45-0.85) 双 ROI，
+            # 即 x 0.10-0.90、y 0.15-0.85；这里保持一致（不含头部/腿部）。
+            bw, bh = x2 - x1, y2 - y1
+            roi = (
+                int(x1 + 0.10 * bw), int(y1 + 0.15 * bh),
+                int(x1 + 0.90 * bw), int(y1 + 0.85 * bh),
+            )
             fused.append(
                 FusedDetection(
                     xyxy=inst.xyxy,
@@ -253,9 +268,12 @@ class DetectionPipeline:
             and (not self.min_box_size or min(f.xyxy[2]-f.xyxy[0], f.xyxy[3]-f.xyxy[1]) >= self.min_box_size)
         ]
         if confirmed:
-            batch = self.uniform.classify_batch(
-                frame_bgr, confirmed, rois=[f.upper_roi for f in confirmed]
-            )
+            if self.uniform.mode == "rule":
+                batch = self.uniform.classify_masks(frame_bgr, confirmed)
+            else:
+                batch = self.uniform.classify_batch(
+                    frame_bgr, confirmed, rois=[f.upper_roi for f in confirmed]
+                )
             uniform_results = {f.bt_key: res for f, res in zip(confirmed, batch)}
         t4 = time.perf_counter()
 

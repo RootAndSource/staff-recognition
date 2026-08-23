@@ -63,6 +63,8 @@ def build_person_record(
         "bt_id": person.bt_id,
         "bbox": [float(v) for v in person.xyxy],
         "uniform": person.uniform,
+        "uniform_raw": person.uniform_raw,
+        "uniform_memory": person.uniform_memory,
         "uniform_state": person.uniform_state,
         "uniform_prob": round(person.uniform_prob, 4),
         "person_restored": person.restored,
