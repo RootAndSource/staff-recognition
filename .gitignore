@@ -43,6 +43,3 @@ temp/
 data/
 models/
 outputs/
-
-# 文档归档（不再跟踪，本地保留）
-docs/
