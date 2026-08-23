@@ -23,6 +23,7 @@ class UniformResult:
     roi_main: tuple[int, int, int, int]   # ? ROI ????
     roi_lower: tuple[int, int, int, int]  # ?? ROI ????
     uniform_prob: float = 0.5             # ???????????????
+    valid: bool = True                    # False = insufficient evidence, S6 keeps previous state
 
 
 @dataclass
@@ -52,8 +53,10 @@ class UniformClassifier:
     normalize: bool = True
     baseline_factor: float = 1.5   # ROI ????? >= ?? * factor ????
     connected_min_ratio: float = 0.05  # ???????? ROI ????????????
-    classifier_path: str | None = None  # MobileNetV3 ??????M3?????? HSV ???
-    classifier_only: bool = True        # True=??????False=???? HSV ???OR?
+    classifier_path: str | None = None  # MobileNetV3 classifier (M3)
+    classifier_only: bool = True        # True=classifier only, False=classifier OR HSV
+    mode: str = "rule"                  # "rule"=mask-based uniform color rules, "cls"=old classifier
+    min_visible_area_ratio: float = 0.08  # min visible mask area (vs box) to judge "no uniform"
 
     @staticmethod
     def _clip_roi(
@@ -229,6 +232,92 @@ class UniformClassifier:
                 roi_lower=roi_lower_list[i],
                 uniform_prob=round(prob, 4),
             ))
+        return results
+
+    def classify_masks(self, frame_bgr: cv2.Mat, dets: list[Any]) -> list[UniformResult]:
+        """S4 mask-based uniform color rules (no training).
+
+        Uses the S2 person visible mask instead of a rectangular ROI, so desk/wall
+        background red pixels are excluded. Rules:
+        - any visible mask block with uniform color -> uniform (lenient)
+        - all blocks without uniform color AND enough visible area -> no uniform
+        - mask too small / missing -> valid=False, S6 keeps previous state
+        """
+        frame_h, frame_w = frame_bgr.shape[:2]
+        hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        red_full = (
+            ((h >= self.hsv_ranges[0][0]) & (h <= self.hsv_ranges[0][1]))
+            | ((h >= self.hsv_ranges[1][0]) & (h <= self.hsv_ranges[1][1]))
+        ) & (s >= self.s_min) & (v >= self.v_min)
+
+        results: list[UniformResult] = []
+        for d in dets:
+            mask = getattr(d, "mask", None)
+            x1, y1, x2, y2 = [int(v) for v in d.xyxy]
+            bw, bh = max(x2 - x1, 1), max(y2 - y1, 1)
+            box_area = bw * bh
+            if mask is None or mask.sum() == 0:
+                results.append(UniformResult(
+                    is_uniform=False, valid=False,
+                    red_ratio=0.0, red_ratio_main=0.0, red_ratio_lower=0.0,
+                    red_ratio_connected=0.0, baseline_ratio=0.0,
+                    roi_main=(x1, y1, x2, y2), roi_lower=(x1, y1, x2, y2),
+                    uniform_prob=0.5,
+                ))
+                continue
+
+            mask_bool = mask > 0.5 if mask.dtype != np.bool_ else mask
+            visible_ratio = float(mask_bool.sum()) / max(box_area, 1)
+            red_in_mask = red_full & mask_bool
+            red_ratio = float(red_in_mask.sum()) / max(mask_bool.sum(), 1)
+            # 最大红色连通块 / 人体掩码面积（不能用整帧面积，否则被稀释）
+            if red_in_mask.any():
+                _, labels, stats, _ = cv2.connectedComponentsWithStats(
+                    red_in_mask.astype(np.uint8), connectivity=8
+                )
+                areas = stats[1:, cv2.CC_STAT_AREA] if stats.shape[0] > 1 else np.zeros((0,), dtype=int)
+                connected = float(areas.max()) / max(mask_bool.sum(), 1) if areas.size else 0.0
+            else:
+                connected = 0.0
+            box_px = (max(0, x1), max(0, y1), min(frame_w, x2), min(frame_h, y2))
+            box_red = red_full[box_px[1]:box_px[3], box_px[0]:box_px[2]]
+            baseline = float(box_red.mean()) if box_red.size else 0.0
+
+            has_uniform_color = (
+                red_ratio >= self.red_ratio_threshold
+                and connected >= self.connected_min_ratio
+            ) or red_ratio >= 0.30
+            if has_uniform_color:
+                evidence = min(1.0, red_ratio * 2.0 + connected * 2.0)
+                results.append(UniformResult(
+                    is_uniform=True, valid=True,
+                    red_ratio=red_ratio, red_ratio_main=red_ratio,
+                    red_ratio_lower=red_ratio, red_ratio_connected=connected,
+                    baseline_ratio=baseline,
+                    roi_main=(x1, y1, x2, y2), roi_lower=(x1, y1, x2, y2),
+                    uniform_prob=round(evidence, 4),
+                ))
+                continue
+
+            if visible_ratio >= self.min_visible_area_ratio:
+                results.append(UniformResult(
+                    is_uniform=False, valid=True,
+                    red_ratio=red_ratio, red_ratio_main=red_ratio,
+                    red_ratio_lower=red_ratio, red_ratio_connected=connected,
+                    baseline_ratio=baseline,
+                    roi_main=(x1, y1, x2, y2), roi_lower=(x1, y1, x2, y2),
+                    uniform_prob=0.0,
+                ))
+            else:
+                results.append(UniformResult(
+                    is_uniform=False, valid=False,
+                    red_ratio=red_ratio, red_ratio_main=red_ratio,
+                    red_ratio_lower=red_ratio, red_ratio_connected=connected,
+                    baseline_ratio=baseline,
+                    roi_main=(x1, y1, x2, y2), roi_lower=(x1, y1, x2, y2),
+                    uniform_prob=0.5,
+                ))
         return results
 
     def classify(self, frame_bgr: cv2.Mat, det: Detection) -> UniformResult:
