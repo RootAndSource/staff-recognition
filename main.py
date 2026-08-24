@@ -128,25 +128,10 @@ def _batch_process_one(
     """处理单个视频（供 batch 串行/并行调用）。"""
     import re
 
-    # 多 GPU 批量：按任务序号轮询分配 device（避免所有进程挤到 cuda:0）
-    # 仅使用实际存在的卡：单卡机器自动退化为 [0]，双 A6000 才轮询 0/1
-    import torch
-
-    n_gpu = torch.cuda.device_count()
-    gpu_ids = [g for g in (cfg.get("batch", {}).get("gpu_ids") or [0]) if g < n_gpu]
-    if not gpu_ids and n_gpu > 0:
-        gpu_ids = [0]  # 配置里没有可用卡时回退到 cuda:0，而不是掉到 CPU
-    device = str(gpu_ids[(idx - 1) % len(gpu_ids)]) if gpu_ids else "cpu"
-    cfg = {
-        **cfg,
-        "model": {**cfg.get("model", {}), "device": device},
-        "segmentation": {**cfg.get("segmentation", {}), "device": device},
-    }
-
     stem = re.sub(r"[^\w\-]+", "_", video.stem)
     json_path = json_dir / f"{stem}.jsonl"
     mp4_path = mp4_dir / f"{stem}.mp4"
-    print(f"[batch] ({idx}/{total}) {video.name} -> {mp4_path.name} (GPU {device})")
+    print(f"[batch] ({idx}/{total}) {video.name} -> {mp4_path.name}")
     pipeline = DetectionPipeline(cfg)
     pipeline.max_frames = max_frames
     cfg["output"]["show"] = False  # 批处理不弹窗

@@ -85,8 +85,7 @@ batch:
   json_dir: "outputs/json"
   mp4_dir: "outputs/mp4"
   extensions: [".mp4", ".avi", ".mov"]
-  gpu_ids: [0, 1]          # 批量多 GPU：按任务序号轮询分配（服务器双 A6000）
-  workers: 2               # 并行进程数（每张卡 1 个；显存充裕可试 4 = 每卡 2 个）
+  workers: 1
 
 evaluate:
   sample_every_n_frames: 30
