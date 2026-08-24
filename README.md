@@ -86,11 +86,16 @@ python main.py run data/preprocessed/005.mp4 \
 # 批量处理 data/preprocessed/ 下所有视频
 python main.py batch
 
+# 批量：指定并行进程数（覆盖 config 的 batch.workers，如每卡 2 个进程）
+python main.py batch --workers 4
+
 # 性能分析
 python main.py run data/preprocessed/005.mp4 --no-show --profile
 ```
 
 `config.yaml` 即最终定案配置（长记忆），直接运行即可；如需调节阈值可修改其中 `identity` / `uniform` 段。
+
+批量多 GPU：`batch.gpu_ids`（默认 `[0, 1]`）按任务序号轮询分配显卡，`batch.workers` 默认 2（每卡 1 个进程）。双 A6000（48GB×2）可先试 `--workers 4`（每卡 2 个进程），显存占用约 8-10GB/进程，注意 CPU 解码与编码可能先成为瓶颈。
 
 ## JSONL 输出格式
 
