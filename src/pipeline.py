@@ -219,6 +219,9 @@ class DetectionPipeline:
         source: str,
         json_path: str | Path | None = None,
         save_video: str | Path | None = None,
+        pbar_position: int = 0,
+        pbar_leave: bool = True,
+        progress_cb=None,
     ) -> PipelineStats:
         """运行主循环；Ctrl+C / 视频结束 / 窗口关闭时退出。"""
         stats = PipelineStats()
@@ -238,7 +241,18 @@ class DetectionPipeline:
             total = vs.frame_count if vs.frame_count and vs.frame_count > 0 else None
             desc = Path(source).name if not source.startswith(("rtsp://", "http://")) else "rtsp"
             frames_iter = vs.frames(skip=skip)
-            with tqdm(total=total, desc=desc, unit="f", unit_scale=False, dynamic_ncols=True) as pbar:
+            pbar = None
+            if progress_cb is None:
+                pbar = tqdm(
+                    total=total,
+                    desc=desc,
+                    unit="f",
+                    unit_scale=False,
+                    dynamic_ncols=True,
+                    position=pbar_position,
+                    leave=pbar_leave,
+                )
+            try:
                 for info in frames_iter:
                     if self.max_frames and stats.frames_processed >= self.max_frames:
                         break
@@ -287,8 +301,14 @@ class DetectionPipeline:
                         if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                             break
 
-                    pbar.update(1)
-                    pbar.set_postfix(people=person_count)
+                    if pbar is not None:
+                        pbar.update(1)
+                        pbar.set_postfix(people=person_count)
+                    elif progress_cb is not None:
+                        progress_cb(stats.frames_processed, total)
+            finally:
+                if pbar is not None:
+                    pbar.close()
 
         if video_writer is not None:
             video_writer.release()

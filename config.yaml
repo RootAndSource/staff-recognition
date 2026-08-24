@@ -85,7 +85,7 @@ batch:
   json_dir: "outputs/json"
   mp4_dir: "outputs/mp4"
   extensions: [".mp4", ".avi", ".mov"]
-  workers: 1
+  workers: 2
 
 evaluate:
   sample_every_n_frames: 30
