@@ -19,7 +19,6 @@ All notable changes to this project are documented in this file.
 - 移除历史双检测融合（upper/full）与实例外观归并（M6）
 - Scripts 精简为 eval 评估脚本（工装指标、ID 稳定性）
 - 跟踪改为 ByteTrack（track_buffer=150 调参定案）
-- 批量支持多 GPU：`batch.gpu_ids` 轮询分配、`batch.workers` 默认 2（双卡）
 
 ### Removed
 
