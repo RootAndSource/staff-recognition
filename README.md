@@ -61,6 +61,13 @@ GPU 版 torch（RTX 4070 实测，YOLO26x + SAM2.1 离线约 1.4 fps）：
 .\.venv\Scripts\pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
+服务器（如双 A6000）装成 CPU 版 torch 时，可用仓库内脚本一键诊断并重装：
+
+```bash
+python scripts/tools/install_gpu_torch.py            # 只诊断
+python scripts/tools/install_gpu_torch.py --install  # 诊断 + 重装 GPU 版
+```
+
 ## 模型获取
 
 本项目使用两个官方预训练模型，不提供模型权重文件：
